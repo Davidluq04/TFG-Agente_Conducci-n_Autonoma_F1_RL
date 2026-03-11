@@ -39,8 +39,8 @@ class F1Env(Env):
 
     #Lo que se le pasa al agente en cada momento
     self.observation_space = Dict({
-        'speed': Box(low = 0, high = 400, shape = (1,)),
-        'position': Box(low = 0, high = 100, shape = (1,)),
+        'speed': Box(low = 0, high = 1.0, shape = (1,)),
+        'position': Box(low = 0, high = 1.0, shape = (1,)),
         'radars': Box(low = 0.0, high = 1.0, shape = (5,))
         })
 
@@ -122,7 +122,7 @@ class F1Env(Env):
     
     # 3. Recortamos la pista con esas medidas exactas
 
-    indice = np.arange(idx_anterior_tick - 5, idx_anterior_tick + 50) % self.track_data_len
+    indice = np.arange(idx_anterior_tick - 30, idx_anterior_tick + 30) % self.track_data_len
 
     x_csv = self.x[indice]
     y_csv = self.y[indice]
@@ -171,7 +171,13 @@ class F1Env(Env):
             avanzado += self.track_data_len
             haTerminado = True # Si ha dado la vuelta al circuito, ha terminado la vuelta
 
+    elif avanzado > 100: # Si ha retrocedido más de 100 puntos, es que ha dado la vuelta al circuito en sentido contrario, así que restamos la longitud del circuito para que el avance sea negativo
+            avanzado -= self.track_data_len
+            haTerminado = False
 
+
+    metros_por_punto = self.track_length / self.track_data_len
+    avanzado_metros = avanzado * metros_por_punto
 
     # 1. ¿Ha chocado o se ha salido? (Castigo máximo)
     if coche_en_grava:
@@ -184,6 +190,7 @@ class F1Env(Env):
         terminated = True
 
     # 3. Sigue en pista conduciendo (Premio por ir rápido)
+
     else:
         # Le damos puntos por la velocidad, pero le restamos 0.1 por cada tick
         # que pasa para que "tenga prisa" en terminar la vuelta
@@ -192,7 +199,7 @@ class F1Env(Env):
         #DIA4: Cambiamos la recompensa para que no dependa de la velocidad, sino de la distancia que avanza, asi el coche no se vuelve loco intentando ir a toda velocidad aunque se salga, 
         # ahora lo importante es avanzar lo máximo posible sin salirse, y para eso le damos puntos por la distancia que avanza
 
-        reward = avanzado * 1 - 0.1 # Le damos puntos por la distancia que avanza, pero le restamos 0.1 por cada tick que pasa para que "tenga prisa" en terminar la vuelta
+        reward = avanzado_metros * 1 - 0.1 # Le damos puntos por la distancia que avanza, pero le restamos 0.1 por cada tick que pasa para que "tenga prisa" en terminar la vuelta
         terminated = False
 
     #---------------------CALCULAR POSITION E INDICE----------------------------
@@ -215,8 +222,8 @@ class F1Env(Env):
 
 
     obs = {
-        'speed': np.array([self.state['speed']], dtype=np.float32),
-        'position': np.array([self.state['position']], dtype=np.float32),
+        'speed': np.array([self.state['speed'] / 340], dtype=np.float32),
+        'position': np.array([self.state['position'] % 100 / 100], dtype=np.float32),
         'radars': np.array(radares_normalizados, dtype=np.float32)
     }
 
@@ -272,8 +279,8 @@ class F1Env(Env):
 
     #La observacion inicial
     obs = {
-        'speed': np.array([self.state['speed']], dtype=np.float32),
-        'position': np.array([self.state['position']], dtype=np.float32),
+        'speed': np.array([self.state['speed'] / 340], dtype=np.float32),
+        'position': np.array([self.state['position'] % 100 / 100], dtype=np.float32),
         'radars': np.array([1, 1, 1, 1, 1], dtype=np.float32)
     }
 
@@ -289,9 +296,9 @@ class F1Env(Env):
     # 1. Calculamos cuántos metros reales representa cada fila del CSV
     metros_por_punto = self.track_length / self.track_data_len
     
-    # 2. Calculamos cuántos puntos necesitamos para cubrir 50m atrás y 350m adelante
-    puntos_atras = int(50 / metros_por_punto)
-    puntos_adelante = int(350 / metros_por_punto) # 350m para que cubra los 300m del radar de sobra
+    # 2. Calculamos cuántos puntos necesitamos para cubrir 320m atrás y 320 adelante
+    puntos_atras = int(320 / metros_por_punto)
+    puntos_adelante = int(320 / metros_por_punto) # 320 para que cubra los 300m del radar de sobra
 
     idx_anterior_tick = self.state['idx_csv']
     
@@ -398,12 +405,12 @@ shower_path = "./Training/SavedModels/showerPPO/"
 
 #GUARDAR MODELO
 print("Guardando modelo...")
-model.save(shower_path + "PPO_F1_1M_V1")
+model.save(shower_path + "PPO_F1_1M_V2")
 
 '''
 
 # Ruta al modelo guardado
-model_path = "./Training/SavedModels/showerPPO.zip"
+model_path = "./Training/SavedModels/showerPPO/PPO_F1_1M_V2"
 
 # 🚀 CARGAR EL MODELO ENTRENADO
 # Observa que usamos PPO.load() en lugar de PPO('MultiInputPolicy', ...)
@@ -415,9 +422,9 @@ print("\n--- EXAMEN DE CONDUCIR ---")
 obs, info = env.reset()
 done = False
 total_reward = 0
+env.render()
 
 while not done:
-    env.render()
     
     # 🌟 LA MAGIA ESTÁ AQUÍ 🌟
     # Le pasamos lo que ven los radares y el velocímetro a la IA, y ella decide los pedales
@@ -427,5 +434,8 @@ while not done:
     obs, reward, terminated, truncated, info = env.step(action)
     total_reward += reward
     done = terminated or truncated
+    env.render()
+
 
 print(f"Resultado final del examen: Premio = {total_reward:.1f}")
+
