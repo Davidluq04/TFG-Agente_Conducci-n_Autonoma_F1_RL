@@ -26,11 +26,31 @@ class F1Env(Env):
     #OBTENER DISTANCIA TOTAL DEL CIRCUTIO PARA LUEGO EL STEP
     self.x = self.track_data['x_m'].values
     self.y = self.track_data['y_m'].values
+    self.ancho_der = self.track_data['w_tr_right_m'].values
+    self.ancho_izq = self.track_data['w_tr_left_m'].values
 
     x_diff = np.diff(self.x)
     y_diff = np.diff(self.y)
     segment_lengths = np.sqrt(x_diff**2 + y_diff**2)
     self.track_length = np.sum(segment_lengths)
+
+
+    #OBTENER LAS PAREDES DEL FINAL DE PISTA
+    
+    dx = np.diff(self.x, append=self.x[0])  # Diferencia en x, con append para cerrar el circuito
+    dy = np.diff(self.y, append=self.y[0])  # Diferencia en y, con append para cerrar el circuito
+
+    segment_lengths = np.sqrt(dx**2 + dy**2)  # Longitud de cada segmento
+
+    nx = -dy / segment_lengths  # Vector normal en x
+    ny = dx / segment_lengths   # Vector normal en y
+
+
+    self.pared_izq_x = self.x + nx * self.ancho_izq
+    self.pared_izq_y = self.y + ny * self.ancho_izq
+
+    self.pared_der_x = self.x - nx * self.ancho_der
+    self.pared_der_y = self.y - ny * self.ancho_der
 
     #AÑADIR VUELTAS SI NO QUIERO QUE SOLO HAGA UNA VUELTA TODO EL RATO
 
@@ -91,7 +111,7 @@ class F1Env(Env):
 
     #trabajamos con radianes para mejor funcionamiento numpy
     #El giro que le damos al coche no es un giro instantaneo, sino que el coche va girando poco a poco, por eso multiplicamos el giro por un factor para que no gire demasiado rapido
-    max_giro_rad_por_tick = 0.1
+    max_giro_rad_por_tick = 0.3
     self.state['angulo'] += giro * max_giro_rad_por_tick
 
     self.state['car_x_position'] += velocidad_ms * np.cos(self.state['angulo']) * dt
@@ -127,8 +147,8 @@ class F1Env(Env):
     x_csv = self.x[indice]
     y_csv = self.y[indice]
 
-    der_csv = self.track_data['w_tr_right_m'].values[indice]
-    izq_csv = self.track_data['w_tr_left_m'].values[indice]
+    der_csv = self.ancho_der[indice]
+    izq_csv = self.ancho_izq[indice]
 
     posicion_co_x = self.state['car_x_position']
     posicion_co_y = self.state['car_y_position']
@@ -179,9 +199,14 @@ class F1Env(Env):
     metros_por_punto = self.track_length / self.track_data_len
     avanzado_metros = avanzado * metros_por_punto
 
+
+    SPEED_REWARD_FACTOR = 0.05 #Factor para evitar que el coche se quede parado
+
+
+
     # 1. ¿Ha chocado o se ha salido? (Castigo máximo)
     if coche_en_grava:
-        reward = -100.0
+        reward = -500.0
         terminated = True
 
     # 2. ¿Ha cruzado la meta de forma segura? (Premio máximo)
@@ -189,8 +214,13 @@ class F1Env(Env):
         reward = 1000.0
         terminated = True
 
-    # 3. Sigue en pista conduciendo (Premio por ir rápido)
 
+    elif self.state['speed']/340 < SPEED_REWARD_FACTOR: # Si va muy lento, le damos un pequeño castigo para que no se quede parado
+        reward = -10.0
+        terminated = False
+
+
+    # 3. Sigue en pista conduciendo (Premio por ir rápido)
     else:
         # Le damos puntos por la velocidad, pero le restamos 0.1 por cada tick
         # que pasa para que "tenga prisa" en terminar la vuelta
@@ -198,6 +228,8 @@ class F1Env(Env):
          
         #DIA4: Cambiamos la recompensa para que no dependa de la velocidad, sino de la distancia que avanza, asi el coche no se vuelve loco intentando ir a toda velocidad aunque se salga, 
         # ahora lo importante es avanzar lo máximo posible sin salirse, y para eso le damos puntos por la distancia que avanza
+        #---COMENTARIOS DE ARRIBA COMO UN DIARIO, NO RELEVANTE AHORA---
+
 
         reward = avanzado_metros * 1 - 0.1 # Le damos puntos por la distancia que avanza, pero le restamos 0.1 por cada tick que pasa para que "tenga prisa" en terminar la vuelta
         terminated = False
@@ -270,9 +302,15 @@ class F1Env(Env):
     super().reset(seed=seed)
 
     #Estado inicial del coche
+
+    # Calcular la dirección del primer segmento de la pista
+    dx_init = self.x[1] - self.x[0]
+    dy_init = self.y[1] - self.y[0]
+    self.state['angulo'] = np.arctan2(dy_init, dx_init) # Orienta el coche hacia adelante
+
+   
     self.state['speed'] = 0
     self.state['position'] = 0
-    self.state['angulo'] = 0
     self.state['car_x_position'] = self.x[0] # Empezamos en la posición del primer punto del CSV
     self.state['car_y_position'] = self.y[0]
     self.state['idx_csv'] = 0
@@ -290,6 +328,7 @@ class F1Env(Env):
 
 
   def calculo_radares(self):
+
     radars = []
     angulo_pri = self.state['angulo']
 
@@ -300,27 +339,70 @@ class F1Env(Env):
     puntos_atras = int(320 / metros_por_punto)
     puntos_adelante = int(320 / metros_por_punto) # 320 para que cubra los 300m del radar de sobra
 
-    idx_anterior_tick = self.state['idx_csv']
+    idx_tick = self.state['idx_csv']
     
     # 3. Recortamos la pista con esas medidas exactas 
-    indice = np.arange(idx_anterior_tick - puntos_atras, idx_anterior_tick + puntos_adelante) % self.track_data_len
+    indice = np.arange(idx_tick - puntos_atras, idx_tick + puntos_adelante) % self.track_data_len
 
-    
-    #El radar esta con el coche como se puede observar en la linea 300 y 301 y el area que ve
+    indice_sig = (indice + 1) % self.track_data_len
+
+    #El radar esta con el coche y el area que ve
     #alrededor suya coincide con la posicion actual que ve ahora mismo a diferencia de antes
     #en la funcion de recompensa que tenemos que trabajar al principio con el indice anterior
     #aunque no influya porque tenemos la posicion del coche
 
-    
+    '''    
     pista_x = self.x[indice]
     pista_y = self.y[indice]
-    pista_izq = self.track_data['w_tr_left_m'].values[indice]
-    pista_der = self.track_data['w_tr_right_m'].values[indice]
+    pista_izq = self.ancho_izq[indice]
+    pista_der = self.ancho_der[indice]
+    '''
+
+    x_radar_ini = self.state['car_x_position']
+    y_radar_ini = self.state['car_y_position']
+
+    #obtener paredes coche
+    x3_pared_izq, y3_pared_izq = self.pared_izq_x[indice], self.pared_izq_y[indice]
+    x4_pared_izq, y4_pared_izq = self.pared_izq_x[indice_sig], self.pared_izq_y[indice_sig]
+
+    x3_pared_der, y3_pared_der = self.pared_der_x[indice], self.pared_der_y[indice]
+    x4_pared_der, y4_pared_der = self.pared_der_x[indice_sig], self.pared_der_y[indice_sig]
+
+
+    x3 = np.concatenate((x3_pared_izq, x3_pared_der))
+    y3 = np.concatenate((y3_pared_izq, y3_pared_der))
+
+    x4 = np.concatenate((x4_pared_izq, x4_pared_der))
+    y4 = np.concatenate((y4_pared_izq, y4_pared_der))
 
     for i in range(5):
         angulor_ra = angulo_pri + np.radians(-90 + i*45) # Radares cada 45 grados, empezando por el de la izquierda
-        dist = 0
+
+        x_radar_fin = self.state['car_x_position'] + 300 * np.cos(angulor_ra)
+        y_radar_fin = self.state['car_y_position'] + 300 * np.sin(angulor_ra)
+
+        denominador = (x_radar_ini - x_radar_fin) * (y3 - y4) - (y_radar_ini - y_radar_fin) * (x3 - x4)
+        # Evitar división por cero
+        denominador[denominador == 0] = 1e-10
+
+        t = ((x_radar_ini - x3) * (y3 - y4) - (y_radar_ini - y3) * (x3 - x4)) / denominador
+        u = -((x_radar_ini - x_radar_fin) * (y_radar_ini - y3) - (y_radar_ini - y_radar_fin) * (x_radar_ini - x3)) / denominador
+
+        # ¿Dónde hay colisiones válidas?
+        colisiones = (t >= 0) & (t <= 1) & (u >= 0) & (u <= 1)
+
+        if np.any(colisiones):
+            # Si hay varias (ej: curvas en S), nos quedamos con la más cercana (el 't' más pequeño)
+            distancia_choque = np.min(t[colisiones]) * 300.0
+            radars.append(distancia_choque)
+        else:
+            # Si no se cruzó con ninguna pared, el radar llega a su máximo
+            radars.append(300.0)
+
+        '''
+         dist = 0
         lim = False
+
         while lim == False and dist < 300:
             dist += 1
             x_radar = self.state['car_x_position'] + dist * np.cos(angulor_ra)
@@ -361,7 +443,8 @@ class F1Env(Env):
                 lim = distancia_al_centro > pista_der[idx_cercano_radar]  
 
         radars.append(dist)   
-
+        '''
+        
     return radars
 
 #CREACION ENTORNO Y PRUEBA DE QUE FUNCIONA
@@ -393,6 +476,7 @@ for episode in range(episodes):
 track_file_path = 'D://Aplicaciones//TFG2//Circuitos//Monza.csv'
 circuito = pd.read_csv(track_file_path)
 env = F1Env(circuito)
+
 '''
 log_path = "./Training/logs/"
 model = PPO('MultiInputPolicy', env, verbose=1, tensorboard_log=log_path)
@@ -405,12 +489,12 @@ shower_path = "./Training/SavedModels/showerPPO/"
 
 #GUARDAR MODELO
 print("Guardando modelo...")
-model.save(shower_path + "PPO_F1_1M_V2")
+model.save(shower_path + "PPO_F1_5M_V1")
 
 '''
 
 # Ruta al modelo guardado
-model_path = "./Training/SavedModels/showerPPO/PPO_F1_1M_V2"
+model_path = "./Training/SavedModels/showerPPO/PPO_F1_5M_V1"
 
 # 🚀 CARGAR EL MODELO ENTRENADO
 # Observa que usamos PPO.load() en lugar de PPO('MultiInputPolicy', ...)
