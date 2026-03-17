@@ -60,8 +60,8 @@ class F1Env(Env):
     #Lo que se le pasa al agente en cada momento
     self.observation_space = Dict({
         'speed': Box(low = 0, high = 1.0, shape = (1,)),
-        'position': Box(low = 0, high = 1.0, shape = (1,)),
-        'radars': Box(low = 0.0, high = 1.0, shape = (5,))
+        #'position': Box(low = 0, high = 1.0, shape = (1,)),
+        'radars': Box(low = 0.0, high = 1.0, shape = (10,))
         })
 
     #Estado agente
@@ -111,7 +111,7 @@ class F1Env(Env):
 
     #trabajamos con radianes para mejor funcionamiento numpy
     #El giro que le damos al coche no es un giro instantaneo, sino que el coche va girando poco a poco, por eso multiplicamos el giro por un factor para que no gire demasiado rapido
-    max_giro_rad_por_tick = 0.3
+    max_giro_rad_por_tick = 0.15
     self.state['angulo'] += giro * max_giro_rad_por_tick
 
     self.state['car_x_position'] += velocidad_ms * np.cos(self.state['angulo']) * dt
@@ -216,7 +216,7 @@ class F1Env(Env):
 
 
     elif self.state['speed']/340 < SPEED_REWARD_FACTOR: # Si va muy lento, le damos un pequeño castigo para que no se quede parado
-        reward = -10.0
+        reward = -5.0
         terminated = False
 
 
@@ -255,7 +255,7 @@ class F1Env(Env):
 
     obs = {
         'speed': np.array([self.state['speed'] / 340], dtype=np.float32),
-        'position': np.array([self.state['position'] % 100 / 100], dtype=np.float32),
+        #'position': np.array([self.state['position'] % 100 / 100], dtype=np.float32),
         'radars': np.array(radares_normalizados, dtype=np.float32)
     }
 
@@ -318,8 +318,8 @@ class F1Env(Env):
     #La observacion inicial
     obs = {
         'speed': np.array([self.state['speed'] / 340], dtype=np.float32),
-        'position': np.array([self.state['position'] % 100 / 100], dtype=np.float32),
-        'radars': np.array([1, 1, 1, 1, 1], dtype=np.float32)
+        #'position': np.array([self.state['position'] % 100 / 100], dtype=np.float32),
+        'radars': np.array([1, 1, 1, 1, 1, 1, 1, 1, 1, 1], dtype=np.float32)
     }
 
     return obs, {}
@@ -375,8 +375,8 @@ class F1Env(Env):
     x4 = np.concatenate((x4_pared_izq, x4_pared_der))
     y4 = np.concatenate((y4_pared_izq, y4_pared_der))
 
-    for i in range(5):
-        angulor_ra = angulo_pri + np.radians(-90 + i*45) # Radares cada 45 grados, empezando por el de la izquierda
+    for i in range(10):
+        angulor_ra = angulo_pri + np.radians(-90 + i*18) # Radares cada 45 grados, empezando por el de la izquierda
 
         x_radar_fin = self.state['car_x_position'] + 300 * np.cos(angulor_ra)
         y_radar_fin = self.state['car_y_position'] + 300 * np.sin(angulor_ra)
@@ -473,11 +473,12 @@ for episode in range(episodes):
 
 
 #CREACION DEL AGENTE
-track_file_path = 'D://Aplicaciones//TFG2//Circuitos//Monza.csv'
+track_file_path = 'D://Aplicaciones//TFG2//Circuitos//Montreal.csv'
 circuito = pd.read_csv(track_file_path)
 env = F1Env(circuito)
 
 '''
+
 log_path = "./Training/logs/"
 model = PPO('MultiInputPolicy', env, verbose=1, tensorboard_log=log_path)
 
@@ -489,12 +490,12 @@ shower_path = "./Training/SavedModels/showerPPO/"
 
 #GUARDAR MODELO
 print("Guardando modelo...")
-model.save(shower_path + "PPO_F1_5M_V1")
+model.save(shower_path + "PPO_F1_1M_V5")
 
 '''
 
 # Ruta al modelo guardado
-model_path = "./Training/SavedModels/showerPPO/PPO_F1_5M_V1"
+model_path = "./Training/SavedModels/showerPPO/PPO_F1_1M_V5"
 
 # 🚀 CARGAR EL MODELO ENTRENADO
 # Observa que usamos PPO.load() en lugar de PPO('MultiInputPolicy', ...)
