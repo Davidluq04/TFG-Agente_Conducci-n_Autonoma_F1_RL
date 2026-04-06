@@ -16,6 +16,14 @@ import matplotlib.pyplot as plt
 from stable_baselines3 import PPO
 from stable_baselines3.common.evaluation import evaluate_policy
 from stable_baselines3.common.vec_env import DummyVecEnv
+from stable_baselines3.common.callbacks import EvalCallback
+from stable_baselines3.common.vec_env import SubprocVecEnv
+from stable_baselines3.common.monitor import Monitor
+
+import pygame
+from pygame.locals import *
+
+import joblib  # Librería para guardar modelos de Machine Learning
 
 class F1Env(Env):
   def __init__(self, track_file_path):
@@ -35,6 +43,10 @@ class F1Env(Env):
     self.track_length = np.sum(segment_lengths)
 
 
+    #PYGAME
+    self.screen = None
+
+
     #OBTENER LAS PAREDES DEL FINAL DE PISTA
     
     dx = np.diff(self.x, append=self.x[0])  # Diferencia en x, con append para cerrar el circuito
@@ -51,6 +63,16 @@ class F1Env(Env):
 
     self.pared_der_x = self.x - nx * self.ancho_der
     self.pared_der_y = self.y - ny * self.ancho_der
+
+    #CARGAR EL MODELO DE FISICAS
+    ruta_modelo_fisicas = 'D://Aplicaciones//TFG2//Training//SavedModels_Supervisado//motor_fisicas_PolynomialFeatures.joblib'
+
+
+    if not os.path.exists(ruta_modelo_fisicas):
+        raise FileNotFoundError(f"No se encontró el modelo en: {ruta_modelo_fisicas}")
+    
+    self.modelo_fisicas = joblib.load(ruta_modelo_fisicas)
+
 
     #AÑADIR VUELTAS SI NO QUIERO QUE SOLO HAGA UNA VUELTA TODO EL RATO
 
@@ -72,7 +94,8 @@ class F1Env(Env):
         'car_y_position': 0,
         'angulo':0,
         #Añadimos esto para no ir calculando en cada step la posicion del coche en el CSV, ya que es un calculo pesado, asi que lo guardamos y solo lo actualizamos cada vez que el coche avanza
-        'idx_csv': 0
+        'idx_csv': 0,
+        'pedal': 0 #para dibujar la barra
     }
     #Radares los vamos a calcular en cada step, no los guardamos en el estado porque no los necesitamos para nada mas que para la observacion, y asi no tenemos que preocuparnos de actualizarlos cada vez que el coche se mueve
 
@@ -82,9 +105,10 @@ class F1Env(Env):
     pedal = action[0]
     giro = action[1]
 
-
+    self.state['pedal'] = pedal # Guardamos el valor del pedal para dibujar la barra
 
     #-----------------------------CAMBIAMOS VELOCIDAD-----------------------
+    '''
     #Añadimos friccion por fisicas
     friccion = self.state['speed'] * 0.02
 
@@ -99,11 +123,37 @@ class F1Env(Env):
 
     # 4. Limitamos entre 0 y 340 km/h (evita que vaya marcha atrás)
     self.state['speed'] = float(np.clip(nueva_velocidad, 0.0, 340.0))
+    '''
 
+    #Vamos a usar el modelo fisicas creado a partir de 65km/h
+    lim_velo_modelo = 65
 
+    
 
+    if self.state['speed'] < lim_velo_modelo:
+        friccion = self.state['speed'] * 0.02
+        if pedal < 0:
+            nueva_velocidad = self.state['speed'] - abs(pedal) * 20 - friccion
+        else:
+            nueva_velocidad = self.state['speed'] + pedal * 10 - friccion
+    else:
+        # Si va a una velocidad donde el modelo de físicas es fiable, usamos el modelo para predecir la delta velocidad
+        if pedal < 0:
+            freno = abs(pedal) * 1
+            aceleracion = 0
+        else:
+            freno = 0
+            aceleracion = pedal * 100
 
+        prediccion_delta_velocidad = self.modelo_fisicas.predict([[self.state['speed'], aceleracion, freno]])[0]
+        nueva_velocidad = self.state['speed'] + prediccion_delta_velocidad
+
+    
+    self.state['speed'] = float(np.clip(nueva_velocidad, 0.0, 340.0))
+
+    
     #---------------------------CAMBIAMOS POSICION COCHE------------------------
+
     #tener en cuenta el angulo coche porque eso hace que avance mas x o y
     #dt tiempo de cada tick
     dt = 0.1
@@ -116,14 +166,33 @@ class F1Env(Env):
 
     self.state['car_x_position'] += velocidad_ms * np.cos(self.state['angulo']) * dt
     self.state['car_y_position'] += velocidad_ms * np.sin(self.state['angulo']) * dt
-
-    #Calculo position luego
-    
+    '''
 
 
 
+    #Vamos a aplicar modelo cinematica bicicleta para que el coche gire de forma mas realista
+    #formula w = v/L * tan(giro)
 
+    #tener en cuenta el angulo coche porque eso hace que avance mas x o y
+    #dt tiempo de cada tick
+    dt = 0.1
+    velocidad_ms = self.state['speed'] / 3.6  # Convertir km/h a m/s
 
+    lon_coc = 3.6
+    lim_giro_rue = np.radians(40) # Las ruedas no pueden girar mas de 40 grados, asi que limitamos el giro a ese valor
+
+    angulo_ruedas = giro * lim_giro_rue
+
+    if(velocidad_ms > 0.5):
+        w = velocidad_ms / lon_coc * np.tan(angulo_ruedas)
+        self.state['angulo'] += w * dt
+    else:
+        pass # Si el coche va muy lento, no gira para evitar que se vuelva loco
+
+    self.state['car_x_position'] += velocidad_ms * np.cos(self.state['angulo']) * dt
+    self.state['car_y_position'] += velocidad_ms * np.sin(self.state['angulo']) * dt
+
+    '''
     #-------------------------FUNCION DE RECOMPENSA--------------------------
     '''
     La funcion de recompensa la he cambiado del dia 2 al 4, en el dia 2 calculaba el idx en base
@@ -265,6 +334,108 @@ class F1Env(Env):
   import matplotlib.pyplot as plt
 
   def render(self):
+    
+    if self.screen is None:
+        pygame.init()
+
+        ancho = 800
+        largo = 800
+        self. centro_ancho = ancho // 2
+        self. centro_largo = largo // 2
+
+        self.escala = 10
+
+        self.fuente = pygame.font.SysFont('Arial', 24, bold=True)
+
+        self.screen = pygame.display.set_mode((ancho, largo))
+
+        coche_img = pygame.image.load('D://Aplicaciones//TFG2//Coche//coche.png') 
+        self.imagen_escalada = pygame.transform.scale(coche_img, (50, 20))
+        self.imagen_escalada = self.imagen_escalada.convert_alpha()  # Convertir para mejorar el rendimiento y mantener la transparencia
+
+        pygame.display.set_caption('Simulador F1 RL')
+
+
+    #----PINTAR CIRCUITO----
+
+    self.coche_x = self.state['car_x_position']
+    self.coche_y = self.state['car_y_position']
+    
+    
+
+    puntos_izq_pantalla = []
+    puntos_der_pantalla = []
+
+    def pasar_a_pixel(x_m, y_m):
+        x_pantalla = int(self.centro_ancho + (x_m - self.coche_x) * self.escala)
+        y_pantalla = int(self.centro_largo + (self.coche_y - y_m) * self.escala) # Invertimos Y porque en Pygame el 0 está arriba
+        return (x_pantalla, y_pantalla)
+
+
+    for x_izq, y_izq in zip(self.pared_izq_x, self.pared_izq_y):
+        puntos_izq_pantalla.append(pasar_a_pixel(x_izq, y_izq))
+
+    for x_der, y_der in zip(self.pared_der_x, self.pared_der_y):
+        puntos_der_pantalla.append(pasar_a_pixel(x_der, y_der))
+
+
+    for e in pygame.event.get():
+       e: pygame.event
+       if e.type == QUIT:
+           self.close()
+
+    self.screen.fill((34, 134, 34))  # Fondo verde para el césped
+
+    pygame.draw.lines(self.screen, (0, 0, 0), True, puntos_izq_pantalla, 2)
+    pygame.draw.lines(self.screen, (0, 0, 0), True, puntos_der_pantalla, 2)
+
+    #----PINTAR COCHE----    
+
+    
+
+    imagen_rotada = pygame.transform.rotate(self.imagen_escalada, np.degrees(self.state['angulo']))
+
+    car_pos = imagen_rotada.get_rect() 
+    car_pos.center = (self.centro_ancho, self.centro_largo)  # El coche siempre en el centro de la pantalla
+
+    self.screen.blit(imagen_rotada, car_pos.topleft)  # Dibujar el coche en la pantalla
+
+
+    #----TELEMETRIA----
+    velocidad_texto = int(self.state['speed'])
+    texto = self.fuente.render(f"Velocidad: {velocidad_texto} km/h", True, (255, 255, 255))  # Velocidad en porcentaje
+    self.screen.blit(texto, (20, 20))  # Mostrar la velocidad en la esquina superior izquierda
+
+    #Aceleracion o frenada
+
+    pedal_pres = self.state.get('pedal', 0)
+
+    pedal_pres = max(-1.0, min(1.0, float(pedal_pres)))
+
+    barra_x = 20
+    barra_y = 60
+    barra_ancho = 200
+    barra_alto = 20
+    centro_barra = barra_x + (barra_ancho // 2)
+    
+    pygame.draw.rect(self.screen, (255, 255, 255), (barra_x, barra_y, barra_ancho, barra_alto), 2)
+    pygame.draw.line(self.screen, (255, 255, 255), (centro_barra, barra_y), (centro_barra, barra_y + barra_alto), 2)
+
+    relleno_ancho = int(abs(pedal_pres) * (barra_ancho / 2))
+
+    if pedal_pres > 0.05:
+        pygame.draw.rect(self.screen, (0, 255, 0), (centro_barra, barra_y, relleno_ancho, barra_alto))
+    elif pedal_pres < -0.05:
+        pygame.draw.rect(self.screen, (255, 0, 0), (centro_barra - relleno_ancho, barra_y, relleno_ancho, barra_alto))
+        
+
+    #pygame.draw.circle(self.screen, (255, 0, 0), car_pos, 5)  # Coche representado como un círculo rojo
+
+    pygame.time.delay(20)  # Pequeña pausa para controlar la velocidad de renderizado
+    pygame.display.flip()
+
+    '''
+
       # Si es la primera vez que llamamos a render, creamos la ventana y el circuito
       if not hasattr(self, 'fig'):
           plt.ion() # Activar modo interactivo
@@ -296,7 +467,7 @@ class F1Env(Env):
       self.fig.canvas.draw()
       self.fig.canvas.flush_events()
       plt.pause(0.001) # Pequeña pausa para que a la pantalla le dé tiempo a pintarse
-
+    '''
 
   def reset(self, seed=None, options=None):
     super().reset(seed=seed)
@@ -304,9 +475,9 @@ class F1Env(Env):
     #Estado inicial del coche
 
     # Calcular la dirección del primer segmento de la pista
-    dx_init = self.x[1] - self.x[0]
-    dy_init = self.y[1] - self.y[0]
-    self.state['angulo'] = np.arctan2(dy_init, dx_init) # Orienta el coche hacia adelante
+    self.dx_init = self.x[1] - self.x[0]
+    self.dy_init = self.y[1] - self.y[0]
+    self.state['angulo'] = np.arctan2(self.dy_init, self.dx_init) # Orienta el coche hacia adelante
 
    
     self.state['speed'] = 0
@@ -314,6 +485,8 @@ class F1Env(Env):
     self.state['car_x_position'] = self.x[0] # Empezamos en la posición del primer punto del CSV
     self.state['car_y_position'] = self.y[0]
     self.state['idx_csv'] = 0
+    self.state['pedal'] = 0
+
 
     #La observacion inicial
     obs = {
@@ -470,32 +643,37 @@ for episode in range(episodes):
     print(f'Episode {episode + 1}: Total Reward: {total_reward}')
 
 '''
-
+'''
 
 #CREACION DEL AGENTE
-track_file_path = 'D://Aplicaciones//TFG2//Circuitos//Montreal.csv'
+track_file_path = 'D://Aplicaciones//TFG2//Circuitos//Monza.csv'
 circuito = pd.read_csv(track_file_path)
 env = F1Env(circuito)
 
-'''
+
 
 log_path = "./Training/logs/"
 model = PPO('MultiInputPolicy', env, verbose=1, tensorboard_log=log_path)
 
 #ENTRENAMIENTO DEL AGENTE
 print("Empezando entrenamiento...") 
-model.learn(total_timesteps=1000000)
+model.learn(total_timesteps=5000000)
 
 shower_path = "./Training/SavedModels/showerPPO/"
 
 #GUARDAR MODELO
 print("Guardando modelo...")
-model.save(shower_path + "PPO_F1_1M_V5")
+model.save(shower_path + "PPO_F1_5M_V4")
 
 '''
 
 # Ruta al modelo guardado
-model_path = "./Training/SavedModels/showerPPO/PPO_F1_1M_V5"
+model_path = "./Training/SavedModels/showerPPO/PPO_F1_5M_V4"
+
+#CREACION DEL AGENTE
+track_file_path = 'D://Aplicaciones//TFG2//Circuitos//Monza.csv'
+circuito = pd.read_csv(track_file_path)
+env = F1Env(circuito)
 
 # 🚀 CARGAR EL MODELO ENTRENADO
 # Observa que usamos PPO.load() en lugar de PPO('MultiInputPolicy', ...)
@@ -524,3 +702,29 @@ while not done:
 
 print(f"Resultado final del examen: Premio = {total_reward:.1f}")
 
+'''
+
+def make_env():
+    # Función auxiliar para crear instancias del entorno
+    def _init():
+        track_file_path = 'D://Aplicaciones//TFG2//Circuitos//Monza.csv'
+        circuito = pd.read_csv(track_file_path)
+        env = F1Env(circuito)
+        return Monitor(env)
+    return _init
+
+# ¡AÑADE ESTA LÍNEA AQUÍ!
+if __name__ == '__main__':
+    # Si tienes un procesador de 8 núcleos, puedes poner 4 u 8 entornos
+    num_cpu = 3 
+    env = SubprocVecEnv([make_env() for i in range(num_cpu)])
+
+    model = PPO('MultiInputPolicy', env, verbose=1, tensorboard_log="./Training/logs/")
+    model.learn(total_timesteps=5000000)
+
+    shower_path = "./Training/SavedModels/showerPPO/"
+
+    # GUARDAR MODELO
+    print("Guardando modelo...")
+    model.save(shower_path + "PPO_F1_5M_V4")
+    '''
