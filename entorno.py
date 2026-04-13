@@ -83,7 +83,8 @@ class F1Env(Env):
     self.observation_space = Dict({
         'speed': Box(low = 0, high = 1.0, shape = (1,)),
         #'position': Box(low = 0, high = 1.0, shape = (1,)),
-        'radars': Box(low = 0.0, high = 1.0, shape = (10,))
+        'radars': Box(low = 0.0, high = 1.0, shape = (11,)),
+        'delta_angulo': Box(low = -1, high = 1, shape = (1,))
         })
 
     #Estado agente
@@ -256,6 +257,7 @@ class F1Env(Env):
     avanzado = self.idx_real - idx_anterior_tick
     haTerminado = False
 
+
     if avanzado < -100: # Si ha avanzado más de 100 puntos, es que ha dado la vuelta al circuito, así que sumamos la longitud del circuito para que el avance sea positivo
             avanzado += self.track_data_len
             haTerminado = True # Si ha dado la vuelta al circuito, ha terminado la vuelta
@@ -269,7 +271,7 @@ class F1Env(Env):
     avanzado_metros = avanzado * metros_por_punto
 
 
-    SPEED_REWARD_FACTOR = 0.05 #Factor para evitar que el coche se quede parado
+    SPEED_REWARD_FACTOR = 0.02 #Factor para evitar que el coche se quede parado
 
 
 
@@ -303,7 +305,26 @@ class F1Env(Env):
         reward = avanzado_metros * 1 - 0.1 # Le damos puntos por la distancia que avanza, pero le restamos 0.1 por cada tick que pasa para que "tenga prisa" en terminar la vuelta
         terminated = False
 
-    #---------------------CALCULAR POSITION E INDICE----------------------------
+    #---------------------CALCULAR POSITION, INDICE, DELTA_ANGULO----------------------------
+
+    
+    tiempo_vision = 1
+
+    metro_delante = max(10, velocidad_ms * tiempo_vision) # Distancia que recorre en 1.5 segundo a la velocidad actual, para anticiparse a las curvas
+    
+    puntos_delante = int(metro_delante / metros_por_punto) # Convertimos esa distancia a puntos del CSV
+
+    idx_futuro = (self.idx_real + puntos_delante) % self.track_data_len #punto en el futuro para anticiparse a las curvas, es como los radares pero para curva
+    
+    x_delante = self.x[idx_futuro]
+    y_delante = self.y[idx_futuro]
+    x_actual = self.x[self.idx_real]
+    y_actual = self.y[self.idx_real]
+
+    angulo_relativo = np.arctan2(y_delante - y_actual, x_delante - x_actual)
+    delta_angulo = (angulo_relativo - self.state['angulo'] + np.pi) % (2 * np.pi) - np.pi # Normalizamos el delta de ángulo a un rango de -pi a pi para que la IA lo entienda mejor
+
+
     
     por_avanzado = (avanzado/self.track_data_len) * 100
     self.state['position'] += por_avanzado
@@ -325,7 +346,8 @@ class F1Env(Env):
     obs = {
         'speed': np.array([self.state['speed'] / 340], dtype=np.float32),
         #'position': np.array([self.state['position'] % 100 / 100], dtype=np.float32),
-        'radars': np.array(radares_normalizados, dtype=np.float32)
+        'radars': np.array(radares_normalizados, dtype=np.float32),
+        'delta_angulo': np.array([delta_angulo / np.pi], dtype=np.float32) # Normalizamos el delta de ángulo a un rango de -1 a 1 dividiendo entre pi, asi la IA lo entiende mejor
     }
 
 
@@ -431,7 +453,7 @@ class F1Env(Env):
 
     #pygame.draw.circle(self.screen, (255, 0, 0), car_pos, 5)  # Coche representado como un círculo rojo
 
-    pygame.time.delay(20)  # Pequeña pausa para controlar la velocidad de renderizado
+    pygame.time.delay(40)  # Pequeña pausa para controlar la velocidad de renderizado
     pygame.display.flip()
 
     '''
@@ -492,7 +514,8 @@ class F1Env(Env):
     obs = {
         'speed': np.array([self.state['speed'] / 340], dtype=np.float32),
         #'position': np.array([self.state['position'] % 100 / 100], dtype=np.float32),
-        'radars': np.array([1, 1, 1, 1, 1, 1, 1, 1, 1, 1], dtype=np.float32)
+        'radars': np.array([1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1], dtype=np.float32),
+        'delta_angulo': np.array([0], dtype=np.float32)
     }
 
     return obs, {}
@@ -548,7 +571,7 @@ class F1Env(Env):
     x4 = np.concatenate((x4_pared_izq, x4_pared_der))
     y4 = np.concatenate((y4_pared_izq, y4_pared_der))
 
-    for i in range(10):
+    for i in range(11):
         angulor_ra = angulo_pri + np.radians(-90 + i*18) # Radares cada 45 grados, empezando por el de la izquierda
 
         x_radar_fin = self.state['car_x_position'] + 300 * np.cos(angulor_ra)
@@ -668,10 +691,10 @@ model.save(shower_path + "PPO_F1_5M_V4")
 '''
 
 # Ruta al modelo guardado
-model_path = "./Training/SavedModels/showerPPO/PPO_F1_5M_V4"
+model_path = "./Training/SavedModels/showerPPO/PPO_F1_5M_V5"
 
 #CREACION DEL AGENTE
-track_file_path = 'D://Aplicaciones//TFG2//Circuitos//Monza.csv'
+track_file_path = 'D://Aplicaciones//TFG2//Circuitos//YasMarina.csv'
 circuito = pd.read_csv(track_file_path)
 env = F1Env(circuito)
 
@@ -713,7 +736,6 @@ def make_env():
         return Monitor(env)
     return _init
 
-# ¡AÑADE ESTA LÍNEA AQUÍ!
 if __name__ == '__main__':
     # Si tienes un procesador de 8 núcleos, puedes poner 4 u 8 entornos
     num_cpu = 3 
@@ -726,5 +748,5 @@ if __name__ == '__main__':
 
     # GUARDAR MODELO
     print("Guardando modelo...")
-    model.save(shower_path + "PPO_F1_5M_V4")
-    '''
+    model.save(shower_path + "PPO_F1_5M_V5")
+'''
