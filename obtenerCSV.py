@@ -4,7 +4,7 @@ import numpy as np
 
 
 # 1. Cargar la sesión (Ej: Clasificación de Monza 2023)
-session = fastf1.get_session(2023, 'Monza', 'Q')
+session = fastf1.get_session(2025, 'Monza', 'R')
 session.load()
 
 laps = session.laps.pick_driver('VER').pick_quicklaps()
@@ -63,7 +63,7 @@ for _, lap in laps.iterlaps():
 dataset_completo = pd.concat(todos_df, ignore_index=True)
 
 #Guardar en ruta local
-ruta_guardado = 'D://Aplicaciones//TFG2//Datasets//telemetria_completa3.csv'
+ruta_guardado = 'D://Aplicaciones//TFG2//Datasets//telemetria_Vers_CarCompl_0.1seg.csv'
 
 # Guardamos el DataFrame resampleado (que ya contiene Speed, Throttle, Brake y Delta_Speed)
 dataset_completo.to_csv(ruta_guardado, index=False)

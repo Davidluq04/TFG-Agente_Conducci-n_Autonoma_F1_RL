@@ -23,13 +23,17 @@ from stable_baselines3.common.monitor import Monitor
 import pygame
 from pygame.locals import *
 
-import joblib  # Librería para guardar modelos de Machine Learning
+import joblib
+
+from f1_render import F1Renderer  # Librería para guardar modelos de Machine Learning
 
 class F1Env(Env):
   def __init__(self, track_file_path):
 
     self.track_data = track_file_path
     self.track_data_len = len(self.track_data)
+
+    self.dt = 0.1
 
     #OBTENER DISTANCIA TOTAL DEL CIRCUTIO PARA LUEGO EL STEP
     self.x = self.track_data['x_m'].values
@@ -44,7 +48,7 @@ class F1Env(Env):
 
 
     #PYGAME
-    self.screen = None
+    self.renderer = None
 
 
     #OBTENER LAS PAREDES DEL FINAL DE PISTA
@@ -110,90 +114,27 @@ class F1Env(Env):
 
     #-----------------------------CAMBIAMOS VELOCIDAD-----------------------
     '''
-    #Añadimos friccion por fisicas
-    friccion = self.state['speed'] * 0.02
-
-    #Si esta frenando frena mas que si esta acelerando
-    if pedal < 0:
-      pedal *= 20
-    else:
-      pedal *= 10
-
-    # 3. Calculamos la nueva velocidad teórica
-    nueva_velocidad = self.state['speed'] + pedal - friccion
-
-    # 4. Limitamos entre 0 y 340 km/h (evita que vaya marcha atrás)
-    self.state['speed'] = float(np.clip(nueva_velocidad, 0.0, 340.0))
+    self.state['speed'] = self.calcular_velocidad_fisicas_basica(pedal)
     '''
 
-    #Vamos a usar el modelo fisicas creado a partir de 65km/h
-    lim_velo_modelo = 65
+    '''
+    self.state['speed'] = self.calcular_velocidad_fisicas_Supervisado(pedal, dt=self.dt)
+    '''
 
-    
-
-    if self.state['speed'] < lim_velo_modelo:
-        friccion = self.state['speed'] * 0.02
-        if pedal < 0:
-            nueva_velocidad = self.state['speed'] - abs(pedal) * 20 - friccion
-        else:
-            nueva_velocidad = self.state['speed'] + pedal * 10 - friccion
-    else:
-        # Si va a una velocidad donde el modelo de físicas es fiable, usamos el modelo para predecir la delta velocidad
-        if pedal < 0:
-            freno = abs(pedal) * 1
-            aceleracion = 0
-        else:
-            freno = 0
-            aceleracion = pedal * 100
-
-        prediccion_delta_velocidad = self.modelo_fisicas.predict([[self.state['speed'], aceleracion, freno]])[0]
-        nueva_velocidad = self.state['speed'] + prediccion_delta_velocidad
-
-    
-    self.state['speed'] = float(np.clip(nueva_velocidad, 0.0, 340.0))
+    self.state['speed'] = self.calcular_velocidad_fisicas(pedal, dt=self.dt)
 
     
     #---------------------------CAMBIAMOS POSICION COCHE------------------------
 
-    #tener en cuenta el angulo coche porque eso hace que avance mas x o y
-    #dt tiempo de cada tick
-    dt = 0.1
-    velocidad_ms = self.state['speed'] / 3.6  # Convertir km/h a m/s
-
-    #trabajamos con radianes para mejor funcionamiento numpy
-    #El giro que le damos al coche no es un giro instantaneo, sino que el coche va girando poco a poco, por eso multiplicamos el giro por un factor para que no gire demasiado rapido
-    max_giro_rad_por_tick = 0.15
-    self.state['angulo'] += giro * max_giro_rad_por_tick
-
-    self.state['car_x_position'] += velocidad_ms * np.cos(self.state['angulo']) * dt
-    self.state['car_y_position'] += velocidad_ms * np.sin(self.state['angulo']) * dt
+    '''
+    self.calcular_posicion_coche_basico(giro)
     '''
 
+    self.calcular_posicion_coche(giro)
 
 
-    #Vamos a aplicar modelo cinematica bicicleta para que el coche gire de forma mas realista
-    #formula w = v/L * tan(giro)
-
-    #tener en cuenta el angulo coche porque eso hace que avance mas x o y
-    #dt tiempo de cada tick
-    dt = 0.1
-    velocidad_ms = self.state['speed'] / 3.6  # Convertir km/h a m/s
-
-    lon_coc = 3.6
-    lim_giro_rue = np.radians(40) # Las ruedas no pueden girar mas de 40 grados, asi que limitamos el giro a ese valor
-
-    angulo_ruedas = giro * lim_giro_rue
-
-    if(velocidad_ms > 0.5):
-        w = velocidad_ms / lon_coc * np.tan(angulo_ruedas)
-        self.state['angulo'] += w * dt
-    else:
-        pass # Si el coche va muy lento, no gira para evitar que se vuelva loco
-
-    self.state['car_x_position'] += velocidad_ms * np.cos(self.state['angulo']) * dt
-    self.state['car_y_position'] += velocidad_ms * np.sin(self.state['angulo']) * dt
-
-    '''
+    
+   
     #-------------------------FUNCION DE RECOMPENSA--------------------------
     '''
     La funcion de recompensa la he cambiado del dia 2 al 4, en el dia 2 calculaba el idx en base
@@ -205,112 +146,14 @@ class F1Env(Env):
     '''
 
 
-    coche_en_grava = False
-    
-
-    idx_anterior_tick = self.state['idx_csv']
-    
-    # 3. Recortamos la pista con esas medidas exactas
-
-    indice = np.arange(idx_anterior_tick - 30, idx_anterior_tick + 30) % self.track_data_len
-
-    x_csv = self.x[indice]
-    y_csv = self.y[indice]
-
-    der_csv = self.ancho_der[indice]
-    izq_csv = self.ancho_izq[indice]
-
-    posicion_co_x = self.state['car_x_position']
-    posicion_co_y = self.state['car_y_position']
-    
-
-
-    #Obtenemos el punto del CSV más cercano al coche, para eso calculamos la distancia al cuadrado de cada punto del CSV con respecto a la posicion del coche, y nos quedamos con el indice del punto que tenga la distancia al cuadrado mas baja, ese es el punto del CSV mas cercano al coche
-    distancias_cuadradas = (self.state['car_x_position'] - x_csv)**2 + (self.state['car_y_position'] - y_csv)**2
-    idx_cercano = np.argmin(distancias_cuadradas)
-
-    self.idx_real = indice[idx_cercano] 
-    # Solo le hacemos la raíz cuadrada al punto ganador para tener la medida real
-    distancia_al_centro = np.sqrt(distancias_cuadradas[idx_cercano])
-
-    #Vamos a calcular si esta a la izq o der de la linea central
-    #Aplicamos Producto Cruz
-    x_punto_actual = x_csv[idx_cercano]
-    y_punto_actual = y_csv[idx_cercano]
-
-
-    pos_csv_sig = (self.idx_real + 1) % self.track_data_len
-    x_csv_sig = self.x[pos_csv_sig]
-    y_csv_sig = self.y[pos_csv_sig]
-
-    pro_cr = (x_csv_sig-x_punto_actual) * (posicion_co_y - y_punto_actual) - (y_csv_sig-y_punto_actual) * (posicion_co_x - x_punto_actual)
-
-    if pro_cr > 0:
-    # El coche está a la IZQUIERDA del centro
-      coche_en_grava = distancia_al_centro > izq_csv[idx_cercano]
-    else:
-    # El coche está a la DERECHA del centro
-      coche_en_grava = distancia_al_centro > der_csv[idx_cercano]
-
-
-    #Dia4: Para calcular en vez de por velocidad por avance y teniendo en cuenta el final del circuito
-    avanzado = self.idx_real - idx_anterior_tick
-    haTerminado = False
-
-
-    if avanzado < -100: # Si ha avanzado más de 100 puntos, es que ha dado la vuelta al circuito, así que sumamos la longitud del circuito para que el avance sea positivo
-            avanzado += self.track_data_len
-            haTerminado = True # Si ha dado la vuelta al circuito, ha terminado la vuelta
-
-    elif avanzado > 100: # Si ha retrocedido más de 100 puntos, es que ha dado la vuelta al circuito en sentido contrario, así que restamos la longitud del circuito para que el avance sea negativo
-            avanzado -= self.track_data_len
-            haTerminado = False
-
-
-    metros_por_punto = self.track_length / self.track_data_len
-    avanzado_metros = avanzado * metros_por_punto
-
-
-    SPEED_REWARD_FACTOR = 0.02 #Factor para evitar que el coche se quede parado
-
-
-
-    # 1. ¿Ha chocado o se ha salido? (Castigo máximo)
-    if coche_en_grava:
-        reward = -500.0
-        terminated = True
-
-    # 2. ¿Ha cruzado la meta de forma segura? (Premio máximo)
-    elif haTerminado:
-        reward = 1000.0
-        terminated = True
-
-
-    elif self.state['speed']/340 < SPEED_REWARD_FACTOR: # Si va muy lento, le damos un pequeño castigo para que no se quede parado
-        reward = -5.0
-        terminated = False
-
-
-    # 3. Sigue en pista conduciendo (Premio por ir rápido)
-    else:
-        # Le damos puntos por la velocidad, pero le restamos 0.1 por cada tick
-        # que pasa para que "tenga prisa" en terminar la vuelta
-        #reward = velocidad_ms - 0.1
-         
-        #DIA4: Cambiamos la recompensa para que no dependa de la velocidad, sino de la distancia que avanza, asi el coche no se vuelve loco intentando ir a toda velocidad aunque se salga, 
-        # ahora lo importante es avanzar lo máximo posible sin salirse, y para eso le damos puntos por la distancia que avanza
-        #---COMENTARIOS DE ARRIBA COMO UN DIARIO, NO RELEVANTE AHORA---
-
-
-        reward = avanzado_metros * 1 - 0.1 # Le damos puntos por la distancia que avanza, pero le restamos 0.1 por cada tick que pasa para que "tenga prisa" en terminar la vuelta
-        terminated = False
-
+    reward, terminated, avanzado_metros = self.calcular_recompensa() 
     #---------------------CALCULAR POSITION, INDICE, DELTA_ANGULO----------------------------
 
-    
-    tiempo_vision = 1
+    metros_por_punto = self.track_length / self.track_data_len
+    tiempo_vision = 1.5
+    velcidad_ms = self.state['speed'] / 3.6
 
-    metro_delante = max(10, velocidad_ms * tiempo_vision) # Distancia que recorre en 1.5 segundo a la velocidad actual, para anticiparse a las curvas
+    metro_delante = max(10, velcidad_ms * tiempo_vision) # Distancia que recorre en 1.5 segundo a la velocidad actual, para anticiparse a las curvas
     
     puntos_delante = int(metro_delante / metros_por_punto) # Convertimos esa distancia a puntos del CSV
 
@@ -326,7 +169,7 @@ class F1Env(Env):
 
 
     
-    por_avanzado = (avanzado/self.track_data_len) * 100
+    por_avanzado = (avanzado_metros/self.track_length) * 100
     self.state['position'] += por_avanzado
     self.state['idx_csv'] = self.idx_real # Guardamos el índice real para el siguiente tick
 
@@ -340,9 +183,6 @@ class F1Env(Env):
 
     #---------------------CALCULAR OBSERVATION----------------------------
 
-
-
-
     obs = {
         'speed': np.array([self.state['speed'] / 340], dtype=np.float32),
         #'position': np.array([self.state['position'] % 100 / 100], dtype=np.float32),
@@ -353,143 +193,25 @@ class F1Env(Env):
 
     return obs, reward, terminated, False, {}
 
-  import matplotlib.pyplot as plt
+
+
+
 
   def render(self):
     
-    if self.screen is None:
-        pygame.init()
-
-        ancho = 800
-        largo = 800
-        self. centro_ancho = ancho // 2
-        self. centro_largo = largo // 2
-
-        self.escala = 10
-
-        self.fuente = pygame.font.SysFont('Arial', 24, bold=True)
-
-        self.screen = pygame.display.set_mode((ancho, largo))
-
-        coche_img = pygame.image.load('D://Aplicaciones//TFG2//Coche//coche.png') 
-        self.imagen_escalada = pygame.transform.scale(coche_img, (50, 20))
-        self.imagen_escalada = self.imagen_escalada.convert_alpha()  # Convertir para mejorar el rendimiento y mantener la transparencia
-
-        pygame.display.set_caption('Simulador F1 RL')
+    # Cargamos el motor gráfico solo si alguien llama a env.render()
+    if self.renderer is None:
+        self.renderer = F1Renderer(
+            self.pared_izq_x, self.pared_izq_y, 
+            self.pared_der_x, self.pared_der_y
+        )
+    # Le pasamos el estado actual para que lo dibuje
+    self.renderer.render(self.state)
 
 
-    #----PINTAR CIRCUITO----
-
-    self.coche_x = self.state['car_x_position']
-    self.coche_y = self.state['car_y_position']
-    
-    
-
-    puntos_izq_pantalla = []
-    puntos_der_pantalla = []
-
-    def pasar_a_pixel(x_m, y_m):
-        x_pantalla = int(self.centro_ancho + (x_m - self.coche_x) * self.escala)
-        y_pantalla = int(self.centro_largo + (self.coche_y - y_m) * self.escala) # Invertimos Y porque en Pygame el 0 está arriba
-        return (x_pantalla, y_pantalla)
 
 
-    for x_izq, y_izq in zip(self.pared_izq_x, self.pared_izq_y):
-        puntos_izq_pantalla.append(pasar_a_pixel(x_izq, y_izq))
 
-    for x_der, y_der in zip(self.pared_der_x, self.pared_der_y):
-        puntos_der_pantalla.append(pasar_a_pixel(x_der, y_der))
-
-
-    for e in pygame.event.get():
-       e: pygame.event
-       if e.type == QUIT:
-           self.close()
-
-    self.screen.fill((34, 134, 34))  # Fondo verde para el césped
-
-    pygame.draw.lines(self.screen, (0, 0, 0), True, puntos_izq_pantalla, 2)
-    pygame.draw.lines(self.screen, (0, 0, 0), True, puntos_der_pantalla, 2)
-
-    #----PINTAR COCHE----    
-
-    
-
-    imagen_rotada = pygame.transform.rotate(self.imagen_escalada, np.degrees(self.state['angulo']))
-
-    car_pos = imagen_rotada.get_rect() 
-    car_pos.center = (self.centro_ancho, self.centro_largo)  # El coche siempre en el centro de la pantalla
-
-    self.screen.blit(imagen_rotada, car_pos.topleft)  # Dibujar el coche en la pantalla
-
-
-    #----TELEMETRIA----
-    velocidad_texto = int(self.state['speed'])
-    texto = self.fuente.render(f"Velocidad: {velocidad_texto} km/h", True, (255, 255, 255))  # Velocidad en porcentaje
-    self.screen.blit(texto, (20, 20))  # Mostrar la velocidad en la esquina superior izquierda
-
-    #Aceleracion o frenada
-
-    pedal_pres = self.state.get('pedal', 0)
-
-    pedal_pres = max(-1.0, min(1.0, float(pedal_pres)))
-
-    barra_x = 20
-    barra_y = 60
-    barra_ancho = 200
-    barra_alto = 20
-    centro_barra = barra_x + (barra_ancho // 2)
-    
-    pygame.draw.rect(self.screen, (255, 255, 255), (barra_x, barra_y, barra_ancho, barra_alto), 2)
-    pygame.draw.line(self.screen, (255, 255, 255), (centro_barra, barra_y), (centro_barra, barra_y + barra_alto), 2)
-
-    relleno_ancho = int(abs(pedal_pres) * (barra_ancho / 2))
-
-    if pedal_pres > 0.05:
-        pygame.draw.rect(self.screen, (0, 255, 0), (centro_barra, barra_y, relleno_ancho, barra_alto))
-    elif pedal_pres < -0.05:
-        pygame.draw.rect(self.screen, (255, 0, 0), (centro_barra - relleno_ancho, barra_y, relleno_ancho, barra_alto))
-        
-
-    #pygame.draw.circle(self.screen, (255, 0, 0), car_pos, 5)  # Coche representado como un círculo rojo
-
-    pygame.time.delay(40)  # Pequeña pausa para controlar la velocidad de renderizado
-    pygame.display.flip()
-
-    '''
-
-      # Si es la primera vez que llamamos a render, creamos la ventana y el circuito
-      if not hasattr(self, 'fig'):
-          plt.ion() # Activar modo interactivo
-          self.fig, self.ax = plt.subplots(figsize=(8, 8))
-          self.fig.canvas.manager.set_window_title('Simulador F1 RL')
-          
-          # Dibujamos la pista (usamos la línea central que tienes en el CSV)
-          # Le ponemos un grosor grande para simular el asfalto
-          self.ax.plot(self.track_data['x_m'], self.track_data['y_m'], color='gray', linewidth=20, alpha=0.5)
-          # Línea central punteada
-          self.ax.plot(self.track_data['x_m'], self.track_data['y_m'], color='white', linestyle='--', linewidth=1)
-          
-          # Creamos el marcador del coche (un punto rojo)
-          self.car_plot, = self.ax.plot([], [], 'ro', markersize=8, label='Coche')
-          self.ax.set_aspect('equal') # Para que las curvas no se deformen
-          self.ax.legend()
-
-      # --- En cada frame, actualizamos la posición ---
-      
-      # 1. Mover el punto rojo a la nueva X e Y
-      self.car_plot.set_data([self.state['car_x_position']], [self.state['car_y_position']])
-      
-      # 2. Mover la cámara para que siga al coche (ventana de 100x100 metros)
-      margen = 100
-      self.ax.set_xlim(self.state['car_x_position'] - margen, self.state['car_x_position'] + margen)
-      self.ax.set_ylim(self.state['car_y_position'] - margen, self.state['car_y_position'] + margen)
-      
-      # 3. Refrescar la pantalla
-      self.fig.canvas.draw()
-      self.fig.canvas.flush_events()
-      plt.pause(0.001) # Pequeña pausa para que a la pantalla le dé tiempo a pintarse
-    '''
 
   def reset(self, seed=None, options=None):
     super().reset(seed=seed)
@@ -522,6 +244,11 @@ class F1Env(Env):
   
 
 
+
+
+  #===========================================================
+  #                   CALCULO RADARES
+  #===========================================================
 
   def calculo_radares(self):
 
@@ -642,90 +369,330 @@ class F1Env(Env):
         '''
         
     return radars
-
-#CREACION ENTORNO Y PRUEBA DE QUE FUNCIONA
-'''
-track_file_path = 'D://Aplicaciones//TFG2//Circuitos//Monza.csv'
-circuito = pd.read_csv(track_file_path)
-print(circuito.columns.tolist())
-env = F1Env(circuito)
-
-episodes = 5
-for episode in range(episodes):
-    obs, _ = env.reset()
-    done = False
-    total_reward = 0
-
-    while not done:
-        env.render()
-        action = env.action_space.sample()  # Acción aleatoria
-        obs, reward, terminated, truncated, info = env.step(action)
-        total_reward += reward
-        done = terminated or truncated
-
-    print(f'Episode {episode + 1}: Total Reward: {total_reward}')
-
-'''
-'''
-
-#CREACION DEL AGENTE
-track_file_path = 'D://Aplicaciones//TFG2//Circuitos//Monza.csv'
-circuito = pd.read_csv(track_file_path)
-env = F1Env(circuito)
+  
 
 
 
-log_path = "./Training/logs/"
-model = PPO('MultiInputPolicy', env, verbose=1, tensorboard_log=log_path)
 
-#ENTRENAMIENTO DEL AGENTE
-print("Empezando entrenamiento...") 
-model.learn(total_timesteps=5000000)
+  #===========================================================
+  #                 CALCULO RECOMPENSA 
+  #===========================================================
 
-shower_path = "./Training/SavedModels/showerPPO/"
+  
+  def calcular_recompensa(self):
+    coche_en_grava = False
 
-#GUARDAR MODELO
-print("Guardando modelo...")
-model.save(shower_path + "PPO_F1_5M_V4")
 
-'''
-
-# Ruta al modelo guardado
-model_path = "./Training/SavedModels/showerPPO/PPO_F1_5M_V5"
-
-#CREACION DEL AGENTE
-track_file_path = 'D://Aplicaciones//TFG2//Circuitos//YasMarina.csv'
-circuito = pd.read_csv(track_file_path)
-env = F1Env(circuito)
-
-# 🚀 CARGAR EL MODELO ENTRENADO
-# Observa que usamos PPO.load() en lugar de PPO('MultiInputPolicy', ...)
-model = PPO.load(model_path, env=env)
-
-print("Modelo cargado correctamente. Iniciando examen...")
-
-print("\n--- EXAMEN DE CONDUCIR ---")
-obs, info = env.reset()
-done = False
-total_reward = 0
-env.render()
-
-while not done:
+    idx_anterior_tick = self.state['idx_csv']
     
-    # 🌟 LA MAGIA ESTÁ AQUÍ 🌟
-    # Le pasamos lo que ven los radares y el velocímetro a la IA, y ella decide los pedales
-    action, _states = model.predict(obs, deterministic=True) 
+    # 3. Recortamos la pista con esas medidas exactas
+
+    indice = np.arange(idx_anterior_tick - 30, idx_anterior_tick + 30) % self.track_data_len
+
+    x_csv = self.x[indice]
+    y_csv = self.y[indice]
+
+    der_csv = self.ancho_der[indice]
+    izq_csv = self.ancho_izq[indice]
+
+    posicion_co_x = self.state['car_x_position']
+    posicion_co_y = self.state['car_y_position']
     
-    # Le pasamos la decisión de la IA al simulador
-    obs, reward, terminated, truncated, info = env.step(action)
-    total_reward += reward
-    done = terminated or truncated
-    env.render()
 
 
-print(f"Resultado final del examen: Premio = {total_reward:.1f}")
+    #Obtenemos el punto del CSV más cercano al coche, para eso calculamos la distancia al cuadrado de cada punto del CSV con respecto a la posicion del coche, y nos quedamos con el indice del punto que tenga la distancia al cuadrado mas baja, ese es el punto del CSV mas cercano al coche
+    distancias_cuadradas = (self.state['car_x_position'] - x_csv)**2 + (self.state['car_y_position'] - y_csv)**2
+    idx_cercano = np.argmin(distancias_cuadradas)
 
-'''
+    self.idx_real = indice[idx_cercano] 
+    # Solo le hacemos la raíz cuadrada al punto ganador para tener la medida real
+    distancia_al_centro = np.sqrt(distancias_cuadradas[idx_cercano])
+
+    #Vamos a calcular si esta a la izq o der de la linea central
+    #Aplicamos Producto Cruz
+    x_punto_actual = x_csv[idx_cercano]
+    y_punto_actual = y_csv[idx_cercano]
+
+
+    pos_csv_sig = (self.idx_real + 1) % self.track_data_len
+    x_csv_sig = self.x[pos_csv_sig]
+    y_csv_sig = self.y[pos_csv_sig]
+
+    pro_cr = (x_csv_sig-x_punto_actual) * (posicion_co_y - y_punto_actual) - (y_csv_sig-y_punto_actual) * (posicion_co_x - x_punto_actual)
+
+    if pro_cr > 0:
+        # El coche está a la IZQUIERDA del centro
+        coche_en_grava = distancia_al_centro > izq_csv[idx_cercano]
+    else:
+    # El coche está a la DERECHA del centro
+        coche_en_grava = distancia_al_centro > der_csv[idx_cercano]
+
+
+    #Dia4: Para calcular en vez de por velocidad por avance y teniendo en cuenta el final del circuito
+    avanzado = self.idx_real - idx_anterior_tick
+    haTerminado = False
+
+
+    if avanzado < -100: # Si ha avanzado más de 100 puntos, es que ha dado la vuelta al circuito, así que sumamos la longitud del circuito para que el avance sea positivo
+            avanzado += self.track_data_len
+            haTerminado = True # Si ha dado la vuelta al circuito, ha terminado la vuelta
+
+    elif avanzado > 100: # Si ha retrocedido más de 100 puntos, es que ha dado la vuelta al circuito en sentido contrario, así que restamos la longitud del circuito para que el avance sea negativo
+            avanzado -= self.track_data_len
+            haTerminado = False
+
+
+    metros_por_punto = self.track_length / self.track_data_len
+    avanzado_metros = avanzado * metros_por_punto
+
+
+    SPEED_REWARD_FACTOR = 0.02 #Factor para evitar que el coche se quede parado
+
+
+
+    # 1. ¿Ha chocado o se ha salido? (Castigo máximo)
+    if coche_en_grava:
+        reward = -500.0
+        terminated = True
+
+    # 2. ¿Ha cruzado la meta de forma segura? (Premio máximo)
+    elif haTerminado:
+        reward = 1000.0
+        terminated = True
+
+
+    elif self.state['speed']/340 < SPEED_REWARD_FACTOR: # Si va muy lento, le damos un pequeño castigo para que no se quede parado
+        reward = -5.0
+        terminated = False
+
+
+    # 3. Sigue en pista conduciendo (Premio por ir rápido)
+    else:
+        # Le damos puntos por la velocidad, pero le restamos 0.1 por cada tick
+        # que pasa para que "tenga prisa" en terminar la vuelta
+        #reward = velocidad_ms - 0.1
+        
+        #DIA4: Cambiamos la recompensa para que no dependa de la velocidad, sino de la distancia que avanza, asi el coche no se vuelve loco intentando ir a toda velocidad aunque se salga, 
+        # ahora lo importante es avanzar lo máximo posible sin salirse, y para eso le damos puntos por la distancia que avanza
+        #---COMENTARIOS DE ARRIBA COMO UN DIARIO, NO RELEVANTE AHORA---
+
+
+        reward = avanzado_metros * 1 - 0.1 # Le damos puntos por la distancia que avanza, pero le restamos 0.1 por cada tick que pasa para que "tenga prisa" en terminar la vuelta
+        terminated = False
+
+    return reward, terminated, avanzado_metros
+  
+  
+
+
+
+
+
+
+  #===========================================================
+  #                 CALCULO FISICAS VELOCIDAD
+  #===========================================================
+
+  def calcular_velocidad_fisicas_basica(self, pedal):
+      #Añadimos friccion por fisicas
+    friccion = self.state['speed'] * 0.02
+
+    #Si esta frenando frena mas que si esta acelerando
+    if pedal < 0:
+      pedal *= 20
+    else:
+      pedal *= 10
+
+    # 3. Calculamos la nueva velocidad teórica
+    nueva_velocidad = self.state['speed'] + pedal - friccion
+
+    # 4. Limitamos entre 0 y 340 km/h (evita que vaya marcha atrás)
+    return float(np.clip(nueva_velocidad, 0.0, 340.0))
+  
+
+
+
+
+
+
+  def calcular_velocidad_fisicas(self, pedal, dt):
+
+    v_ms = self.state['speed'] / 3.6  # Convertimos km/h a m/s
+    
+    # Parámetros físicos locales (Mantenemos los mismos que en posicion_coche)
+    masa = 798.0            
+    gravedad = 9.81         
+    constante_aero = 2.7    # Usamos tu constante_aero (engloba densidad, sustentación y área)
+    
+    # Parámetros exclusivos de la velocidad
+    rho = 1.225             # Densidad del aire (kg/m^3) para el drag
+    CdA = 1.5               # Coeficiente de drag * Área frontal
+    Crr = 0.015             # Coeficiente de resistencia a la rodadura
+    potencia_max = 750000.0 # Potencia del motor en Watts (aprox 1000 CV)
+
+    # 1. FUERZAS DE RESISTENCIA (Drag aerodinámico y rodadura)
+    fuerza_drag = 0.5 * rho * CdA * (v_ms ** 2)
+    fuerza_rodadura = Crr * masa * gravedad
+    
+    # La resistencia solo aplica si el coche se está moviendo
+    fuerza_resistencia = fuerza_drag + fuerza_rodadura if v_ms > 0.1 else 0.0
+
+    # 2. FUERZA LONGITUDINAL (Acción del acelerador / freno)
+    fuerza_longitudinal = 0.0
+    
+    if pedal > 0:
+        # ACELERANDO
+        if v_ms < 15.0: 
+            # Límite por tracción mecánica a baja velocidad
+            fuerza_motor_max = masa * gravedad * 1.5  
+        else:
+            # Límite por potencia del motor a alta velocidad: F = P / v
+            fuerza_motor_max = potencia_max / v_ms
+        
+        fuerza_longitudinal = pedal * fuerza_motor_max
+        
+    elif pedal < 0:
+        # FRENANDO
+        # El Downforce aplasta el coche y permite frenar mucho más fuerte a alta velocidad
+        fuerza_downforce = constante_aero * (v_ms ** 2)
+        fuerza_normal = (masa * gravedad) + fuerza_downforce
+        
+        mu_freno = 1.8 # Coeficiente de fricción extrema
+        fuerza_freno_max = mu_freno * fuerza_normal
+        
+        fuerza_longitudinal = pedal * fuerza_freno_max
+
+    # 3. SEGUNDA LEY DE NEWTON (F_neta = m * a)
+    if v_ms > 0.1:
+        fuerza_neta = fuerza_longitudinal - fuerza_resistencia
+    else:
+        # Si está parado, la aerodinámica no lo empuja hacia atrás
+        fuerza_neta = max(0.0, fuerza_longitudinal)
+
+    aceleracion = fuerza_neta / masa
+    
+    # 4. CINEMÁTICA
+    nuevo_v_ms = v_ms + (aceleracion * dt)
+    nuevo_v_ms = max(0.0, nuevo_v_ms) # Evitar ir marcha atrás
+    
+    # Devolver en km/h limitando a la velocidad punta teórica (360 km/h)
+    return float(np.clip(nuevo_v_ms * 3.6, 0.0, 360.0))
+  
+
+
+
+
+  def calcular_velocidad_fisicas_Supervisado(self, pedal, dt):
+      #Vamos a usar el modelo fisicas creado a partir de 65km/h
+    lim_velo_modelo = 65
+
+    
+
+    if self.state['speed'] < lim_velo_modelo:
+        friccion = self.state['speed'] * 0.02
+        if pedal < 0:
+            nueva_velocidad = self.state['speed'] - abs(pedal) * 20 - friccion
+        else:
+            nueva_velocidad = self.state['speed'] + pedal * 10 - friccion
+    else:
+        # Si va a una velocidad donde el modelo de físicas es fiable, usamos el modelo para predecir la delta velocidad
+        if pedal < 0:
+            freno = abs(pedal) * 1
+            aceleracion = 0
+        else:
+            freno = 0
+            aceleracion = pedal * 100
+
+        prediccion_delta_velocidad = self.modelo_fisicas.predict([[self.state['speed'], aceleracion, freno]])[0]
+        nueva_velocidad = self.state['speed'] + prediccion_delta_velocidad
+
+    
+    return float(np.clip(nueva_velocidad, 0.0, 340.0))
+
+
+
+    
+  
+  #===========================================================
+  #                 CALCULO FISICAS POSICION
+  #===========================================================
+
+  def calcular_posicion_coche_basico(self, giro):
+    #tener en cuenta el angulo coche porque eso hace que avance mas x o y
+    #dt tiempo de cada tick
+    dt = self.dt
+    velocidad_ms = self.state['speed'] / 3.6  # Convertir km/h a m/s
+
+    #trabajamos con radianes para mejor funcionamiento numpy
+    #El giro que le damos al coche no es un giro instantaneo, sino que el coche va girando poco a poco, por eso multiplicamos el giro por un factor para que no gire demasiado rapido
+    max_giro_rad_por_tick = 0.15
+    self.state['angulo'] += giro * max_giro_rad_por_tick
+
+    self.state['car_x_position'] += velocidad_ms * np.cos(self.state['angulo']) * dt
+    self.state['car_y_position'] += velocidad_ms * np.sin(self.state['angulo']) * dt
+  
+
+
+
+
+
+
+  def calcular_posicion_coche(self, giro):
+      
+    #Variables fisicas del coche
+    masa = 798.0
+    lon_coc = 3.6 #longitud entre ejes coche
+    gravedad = 9.81
+    constante_aero = 2.7 #densidad aire nivel mar(1.225) * coeficiente de sustentación(3) * area frontal(1.5)
+    velocidad_ms = self.state['speed'] / 3.6  # Convertir km/h a m/s
+    mu = 1.6 # Coeficiente de fricción estática de los neumáticos de F1
+    lim_giro_mecanico_rad = np.radians(18) # El tope físico de la dirección del F1 (unos 18º)
+
+
+
+    #Calcular fuerza adherencia maxima, teniendo en cuenta downforce y centipreta
+    fuerza_adh_max = (masa * gravedad) + (constante_aero * velocidad_ms**2)
+
+    #Aceleracion lateral máxima que pueden soportar los neumáticos sin derrapar
+    a_lat_max = mu * fuerza_adh_max / masa
+
+    #Tasa de giro máxima que pueden soportar los neumáticos sin derrapar (en rad/s)
+    w_max = a_lat_max / max(velocidad_ms, 0.1) # Evitamos división por cero a muy baja velocidad
+
+    #Ángulo de giro máximo permitido a esta velocidad (en radianes)
+    angulo_max_giro = np.arctan((w_max * lon_coc) / max(velocidad_ms, 0.1)) # Despejamos el ángulo de la fórmula de la bicicleta: w = (v / L) * tan(angulo)
+
+    lim_giro_real = min(angulo_max_giro, lim_giro_mecanico_rad) # El coche no puede girar más del tope mecánico de la dirección, ni más de lo que la física permite antes de derrapar.
+  
+    
+    angulo_ruedas = giro * lim_giro_real # La acción del agente 'giro' va de -1 a 1. La multiplicamos por el límite real calculado en ese instante.
+
+    w_real = (velocidad_ms / lon_coc) * np.tan(angulo_ruedas) # Tasa de giro real basada en el ángulo de las ruedas
+
+    # Actualizamos el estado del coche
+    self.state['angulo'] += w_real * self.dt
+    self.state['car_x_position'] += velocidad_ms * np.cos(self.state['angulo']) * self.dt
+    self.state['car_y_position'] += velocidad_ms * np.sin(self.state['angulo']) * self.dt
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 def make_env():
     # Función auxiliar para crear instancias del entorno
@@ -748,5 +715,33 @@ if __name__ == '__main__':
 
     # GUARDAR MODELO
     print("Guardando modelo...")
-    model.save(shower_path + "PPO_F1_5M_V5")
-'''
+    model.save(shower_path + "PPO_F1_5M_V8")
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
