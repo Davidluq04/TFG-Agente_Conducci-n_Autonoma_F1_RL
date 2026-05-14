@@ -15,7 +15,7 @@ import matplotlib.pyplot as plt
 #Stable-Baselines
 from stable_baselines3 import PPO
 from stable_baselines3.common.evaluation import evaluate_policy
-from stable_baselines3.common.vec_env import DummyVecEnv
+from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
 from stable_baselines3.common.callbacks import EvalCallback
 from stable_baselines3.common.vec_env import SubprocVecEnv
 from stable_baselines3.common.monitor import Monitor
@@ -28,7 +28,10 @@ import joblib
 from f1_render import F1Renderer  # Librería para guardar modelos de Machine Learning
 
 class F1Env(Env):
-  def __init__(self, track_file_path):
+  def __init__(self, track_file_path, tipo_fisicas=3, tipo_recompensa="V1"):
+
+    self.tipo_fisicas = tipo_fisicas #1=Basicas, 2=Supervisadas, 3=Avanzadas
+    self.tipo_recompensa = tipo_recompensa
 
     self.track_data = track_file_path
     self.track_data_len = len(self.track_data)
@@ -69,14 +72,24 @@ class F1Env(Env):
     self.pared_der_y = self.y - ny * self.ancho_der
 
     #CARGAR EL MODELO DE FISICAS
-    ruta_modelo_fisicas = 'D://Aplicaciones//TFG2//Training//SavedModels_Supervisado//motor_fisicas_PolynomialFeatures.joblib'
+    if self.tipo_fisicas == 2:
+        ruta_modelo_fisicas = 'D://Aplicaciones//TFG2//Training//SavedModels_Supervisado//motor_fisicas_RandomForestRegressor_v3.joblib'
+        self.modelo_fisicas = joblib.load(ruta_modelo_fisicas)
+
+        if not os.path.exists(ruta_modelo_fisicas):
+            raise FileNotFoundError(f"No se encontró el modelo en: {ruta_modelo_fisicas}")
+
+        
+        
+    if self.tipo_recompensa == "V2":    
+        self.x_ideal = self.track_data['ideal_x'].values
+        self.y_ideal = self.track_data['ideal_y'].values
+        self.speed_ideal = self.track_data['ideal_speed'].values        
 
 
-    if not os.path.exists(ruta_modelo_fisicas):
-        raise FileNotFoundError(f"No se encontró el modelo en: {ruta_modelo_fisicas}")
+   
     
-    self.modelo_fisicas = joblib.load(ruta_modelo_fisicas)
-
+    
 
     #AÑADIR VUELTAS SI NO QUIERO QUE SOLO HAGA UNA VUELTA TODO EL RATO
 
@@ -88,7 +101,8 @@ class F1Env(Env):
         'speed': Box(low = 0, high = 1.0, shape = (1,)),
         #'position': Box(low = 0, high = 1.0, shape = (1,)),
         'radars': Box(low = 0.0, high = 1.0, shape = (11,)),
-        'delta_angulo': Box(low = -1, high = 1, shape = (1,))
+        'delta_angulo': Box(low = -1, high = 1, shape = (1,)),
+        #'velocidad_futura': Box(low = 0, high = 1.0, shape = (1,))
         })
 
     #Estado agente
@@ -113,24 +127,20 @@ class F1Env(Env):
     self.state['pedal'] = pedal # Guardamos el valor del pedal para dibujar la barra
 
     #-----------------------------CAMBIAMOS VELOCIDAD-----------------------
-    '''
-    self.state['speed'] = self.calcular_velocidad_fisicas_basica(pedal)
-    '''
-
-    '''
-    self.state['speed'] = self.calcular_velocidad_fisicas_Supervisado(pedal, dt=self.dt)
-    '''
-
-    self.state['speed'] = self.calcular_velocidad_fisicas(pedal, dt=self.dt)
+    if self.tipo_fisicas == 1:
+        self.state['speed'] = self.calcular_velocidad_fisicas_basica(pedal)
+    elif self.tipo_fisicas == 2:
+        self.state['speed'] = self.calcular_velocidad_fisicas_Supervisado(pedal, dt=self.dt)
+    else:   
+        self.state['speed'] = self.calcular_velocidad_fisicas(pedal, dt=self.dt)
 
     
     #---------------------------CAMBIAMOS POSICION COCHE------------------------
 
-    '''
-    self.calcular_posicion_coche_basico(giro)
-    '''
-
-    self.calcular_posicion_coche(giro)
+    if self.tipo_fisicas == 3:
+        self.calcular_posicion_coche(giro)
+    else:
+        self.calcular_posicion_coche_basico(giro)
 
 
     
@@ -146,8 +156,11 @@ class F1Env(Env):
     '''
 
 
-    reward, terminated, avanzado_metros = self.calcular_recompensa() 
-    #---------------------CALCULAR POSITION, INDICE, DELTA_ANGULO----------------------------
+    if self.tipo_recompensa == "V1":
+         reward, terminated, avanzado_metros = self.calcular_recompensa()
+    else:
+        reward, terminated, avanzado_metros = self.calcular_recompensa_V2()
+    #---------------------CALCULAR POSITION, INDICE, DELTA_ANGULO, VELOCIDAD FUTURA----------------------------
 
     metros_por_punto = self.track_length / self.track_data_len
     tiempo_vision = 1.5
@@ -173,7 +186,11 @@ class F1Env(Env):
     self.state['position'] += por_avanzado
     self.state['idx_csv'] = self.idx_real # Guardamos el índice real para el siguiente tick
 
-    
+    #otra vez idx_futuro para metros
+
+    #idx_futuro_50m = (self.idx_real + puntos_delante) % self.track_data_len 
+
+    #self.velocidad_futura = self.speed_ideal[idx_futuro_50m]
     #---------------------CALCULAR RADARES----------------------------
 
     radares = self.calculo_radares()
@@ -184,10 +201,11 @@ class F1Env(Env):
     #---------------------CALCULAR OBSERVATION----------------------------
 
     obs = {
-        'speed': np.array([self.state['speed'] / 340], dtype=np.float32),
+        'speed': np.array([self.state['speed'] / 350], dtype=np.float32),
         #'position': np.array([self.state['position'] % 100 / 100], dtype=np.float32),
         'radars': np.array(radares_normalizados, dtype=np.float32),
-        'delta_angulo': np.array([delta_angulo / np.pi], dtype=np.float32) # Normalizamos el delta de ángulo a un rango de -1 a 1 dividiendo entre pi, asi la IA lo entiende mejor
+        'delta_angulo': np.array([delta_angulo / np.pi], dtype=np.float32), # Normalizamos el delta de ángulo a un rango de -1 a 1 dividiendo entre pi, asi la IA lo entiende mejor
+        #'velocidad_futura': np.array([self.velocidad_futura / 350], dtype=np.float32)
     }
 
 
@@ -224,7 +242,10 @@ class F1Env(Env):
     self.state['angulo'] = np.arctan2(self.dy_init, self.dx_init) # Orienta el coche hacia adelante
 
    
-    self.state['speed'] = 0
+    if self.tipo_recompensa == "V2":
+        self.state['speed'] = self.speed_ideal[0] # Empezamos con la velocidad ideal del primer punto del CSV
+    else:
+        self.state['speed'] = 0 # Empezamos con la velocidad ideal del primer punto del CSV
     self.state['position'] = 0
     self.state['car_x_position'] = self.x[0] # Empezamos en la posición del primer punto del CSV
     self.state['car_y_position'] = self.y[0]
@@ -232,12 +253,26 @@ class F1Env(Env):
     self.state['pedal'] = 0
 
 
+    # 5. OBTENER OBSERVACIONES INICIALES REALES
+    metros_por_punto = self.track_length / self.track_data_len
+    tiempo_vision = 1.5
+    
+    # Calculamos la visión dinámica para el tick 0
+    metro_delante_inicial = 1 * tiempo_vision
+    puntos_delante_dinamicos = int(metro_delante_inicial / metros_por_punto)
+    
+    idx_futuro = (self.state['idx_csv'] + puntos_delante_dinamicos) % self.track_data_len
+    
+    #self.velocidad_futura = self.speed_ideal[idx_futuro]
+
     #La observacion inicial
     obs = {
-        'speed': np.array([self.state['speed'] / 340], dtype=np.float32),
+        'speed': np.array([self.state['speed'] / 350], dtype=np.float32),
         #'position': np.array([self.state['position'] % 100 / 100], dtype=np.float32),
         'radars': np.array([1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1], dtype=np.float32),
-        'delta_angulo': np.array([0], dtype=np.float32)
+        'delta_angulo': np.array([0], dtype=np.float32),
+        #'velocidad_futura': np.array([self.speed_ideal[idx_futuro] / 350], dtype=np.float32)
+
     }
 
     return obs, {}
@@ -452,7 +487,7 @@ class F1Env(Env):
 
     # 1. ¿Ha chocado o se ha salido? (Castigo máximo)
     if coche_en_grava:
-        reward = -500.0
+        reward = -500
         terminated = True
 
     # 2. ¿Ha cruzado la meta de forma segura? (Premio máximo)
@@ -461,7 +496,7 @@ class F1Env(Env):
         terminated = True
 
 
-    elif self.state['speed']/340 < SPEED_REWARD_FACTOR: # Si va muy lento, le damos un pequeño castigo para que no se quede parado
+    elif self.state['speed']/350 < SPEED_REWARD_FACTOR: # Si va muy lento, le damos un pequeño castigo para que no se quede parado
         reward = -5.0
         terminated = False
 
@@ -477,11 +512,139 @@ class F1Env(Env):
         #---COMENTARIOS DE ARRIBA COMO UN DIARIO, NO RELEVANTE AHORA---
 
 
+        # 2. Bono Cuadrático por Velocidad
+        # Normalizamos la velocidad entre 0 y 1 respecto a la máxima (350 km/h)
+        vel_normalizada = self.state['speed'] / 350.0 
+        
+        # Al elevar al cuadrado, premia masivamente ir a 300km/h frente a 150km/h
+        # Multiplicamos por 5 (puedes ajustar este factor) para darle peso
+        if avanzado_metros > 0:
+            bono_velocidad = (vel_normalizada ** 2) * 5.0
+        else:  
+            bono_velocidad = 0.0  # Sin bono si no avanza, para evitar que se quede parado intentando ir a toda velocidad sin avanzar
+
+
         reward = avanzado_metros * 1 - 0.1 # Le damos puntos por la distancia que avanza, pero le restamos 0.1 por cada tick que pasa para que "tenga prisa" en terminar la vuelta
         terminated = False
 
     return reward, terminated, avanzado_metros
   
+
+
+
+
+  
+
+  def calcular_recompensa_V2(self):
+    coche_en_grava = False
+
+
+    idx_anterior_tick = self.state['idx_csv']
+    
+    # 3. Recortamos la pista con esas medidas exactas
+
+    indice = np.arange(idx_anterior_tick - 30, idx_anterior_tick + 30) % self.track_data_len
+
+    x_csv = self.x[indice]
+    y_csv = self.y[indice]
+
+    der_csv = self.ancho_der[indice]
+    izq_csv = self.ancho_izq[indice]
+
+    posicion_co_x = self.state['car_x_position']
+    posicion_co_y = self.state['car_y_position']
+    
+
+
+    #Obtenemos el punto del CSV más cercano al coche, para eso calculamos la distancia al cuadrado de cada punto del CSV con respecto a la posicion del coche, y nos quedamos con el indice del punto que tenga la distancia al cuadrado mas baja, ese es el punto del CSV mas cercano al coche
+    distancias_cuadradas = (self.state['car_x_position'] - x_csv)**2 + (self.state['car_y_position'] - y_csv)**2
+    idx_cercano = np.argmin(distancias_cuadradas)
+
+    self.idx_real = indice[idx_cercano] 
+    # Solo le hacemos la raíz cuadrada al punto ganador para tener la medida real
+    distancia_al_centro = np.sqrt(distancias_cuadradas[idx_cercano])
+
+    #Vamos a calcular si esta a la izq o der de la linea central
+    #Aplicamos Producto Cruz
+    x_punto_actual = x_csv[idx_cercano]
+    y_punto_actual = y_csv[idx_cercano]
+
+
+    pos_csv_sig = (self.idx_real + 1) % self.track_data_len
+    x_csv_sig = self.x[pos_csv_sig]
+    y_csv_sig = self.y[pos_csv_sig]
+
+    pro_cr = (x_csv_sig-x_punto_actual) * (posicion_co_y - y_punto_actual) - (y_csv_sig-y_punto_actual) * (posicion_co_x - x_punto_actual)
+
+    if pro_cr > 0:
+        # El coche está a la IZQUIERDA del centro
+        coche_en_grava = distancia_al_centro > izq_csv[idx_cercano]
+    else:
+    # El coche está a la DERECHA del centro
+        coche_en_grava = distancia_al_centro > der_csv[idx_cercano]
+
+
+    avanzado = self.idx_real - idx_anterior_tick
+    haTerminado = False
+
+
+    if avanzado < -100: # Si ha avanzado más de 100 puntos, es que ha dado la vuelta al circuito, así que sumamos la longitud del circuito para que el avance sea positivo
+            avanzado += self.track_data_len
+            haTerminado = True # Si ha dado la vuelta al circuito, ha terminado la vuelta
+
+    elif avanzado > 100: # Si ha retrocedido más de 100 puntos, es que ha dado la vuelta al circuito en sentido contrario, así que restamos la longitud del circuito para que el avance sea negativo
+            avanzado -= self.track_data_len
+            haTerminado = False
+
+
+    metros_por_punto = self.track_length / self.track_data_len
+    avanzado_metros = avanzado * metros_por_punto
+
+
+    SPEED_REWARD_FACTOR = 0.02 #Factor para evitar que el coche se quede parado
+
+
+    if coche_en_grava:
+        reward = -50.0
+        terminated = True
+    
+    elif haTerminado:
+        reward = 250.0
+        terminated = True
+    
+    elif self.state['speed']/350 < SPEED_REWARD_FACTOR: # Si va muy lento, le damos un pequeño castigo para que no se quede parado
+        reward = -5.0
+        terminated = False
+    
+    else:
+        speed_ideal_actual = self.speed_ideal[self.idx_real]
+        velocidad_ms = self.state['speed'] / 3.6
+        velocidad_ms_ideal = speed_ideal_actual / 3.6
+
+        x_actual_ideal = self.x_ideal[self.idx_real]
+        y_actual_ideal = self.y_ideal[self.idx_real]
+        distancia_ideal = np.sqrt((posicion_co_x - x_actual_ideal)**2 + (posicion_co_y - y_actual_ideal)**2)
+
+        peso_diff_vel = 0.05
+        peso_diff_dist = 0.2
+
+        recompensa_base = avanzado_metros * 1.5
+
+        if velocidad_ms > speed_ideal_actual:
+            penalizacion_velocidad = 0# Bonus por ir más rápido que el ideal, pero sin pasarse
+        else:
+            penalizacion_velocidad = peso_diff_vel * (velocidad_ms - velocidad_ms_ideal) # Penalización por ir más lento que el ideal
+        
+
+        reward = recompensa_base - penalizacion_velocidad - (peso_diff_dist * distancia_ideal)
+        
+        terminated = False
+
+
+
+    
+    return reward, terminated, avanzado_metros
+
   
 
 
@@ -494,6 +657,7 @@ class F1Env(Env):
   #===========================================================
 
   def calcular_velocidad_fisicas_basica(self, pedal):
+    #EL DT TIENE QUE SER DE 0.1 PARA QUE COINCIDA
       #Añadimos friccion por fisicas
     friccion = self.state['speed'] * 0.02
 
@@ -507,7 +671,7 @@ class F1Env(Env):
     nueva_velocidad = self.state['speed'] + pedal - friccion
 
     # 4. Limitamos entre 0 y 340 km/h (evita que vaya marcha atrás)
-    return float(np.clip(nueva_velocidad, 0.0, 340.0))
+    return float(np.clip(nueva_velocidad, 0.0, 350.0))
   
 
 
@@ -607,7 +771,7 @@ class F1Env(Env):
         nueva_velocidad = self.state['speed'] + prediccion_delta_velocidad
 
     
-    return float(np.clip(nueva_velocidad, 0.0, 340.0))
+    return float(np.clip(nueva_velocidad, 0.0, 350.0))
 
 
 
@@ -697,7 +861,7 @@ class F1Env(Env):
 def make_env():
     # Función auxiliar para crear instancias del entorno
     def _init():
-        track_file_path = 'D://Aplicaciones//TFG2//Circuitos//Monza.csv'
+        track_file_path = 'D://Aplicaciones//TFG2//Datasets//FuncionRecompensa//Monza_RL.csv'
         circuito = pd.read_csv(track_file_path)
         env = F1Env(circuito)
         return Monitor(env)
@@ -706,16 +870,34 @@ def make_env():
 if __name__ == '__main__':
     # Si tienes un procesador de 8 núcleos, puedes poner 4 u 8 entornos
     num_cpu = 3 
+
     env = SubprocVecEnv([make_env() for i in range(num_cpu)])
 
-    model = PPO('MultiInputPolicy', env, verbose=1, tensorboard_log="./Training/logs/")
-    model.learn(total_timesteps=5000000)
+    eval_env = DummyVecEnv([make_env()])
 
     shower_path = "./Training/SavedModels/showerPPO/"
+    nombre_modelo_anterior = "PPO_F1_10M_V1.zip" # Si quieres continuar el entrenamiento desde un modelo anterior, pon su nombre aquí. Si no, pon None o una cadena vacía.
 
+    val_callback = EvalCallback(eval_env, best_model_save_path=shower_path + 'Mejores_Modelos/',
+                                 log_path='./Training/logs/evaluations/', eval_freq=max(50000 // num_cpu, 1),
+                                 deterministic=True, render=False, n_eval_episodes=5)
+
+    
+
+    '''
+    model = PPO.load(
+        shower_path + nombre_modelo_anterior, 
+        env=env,
+    )
+    model.learn(total_timesteps=5000000, reset_num_timesteps=False, callback=val_callback) # Continuamos el entrenamiento desde el modelo anterior, sin resetear el contador de timesteps
+    '''
+
+    model = PPO('MultiInputPolicy', env, verbose=1, tensorboard_log="./Training/logs/")
+    model.learn(total_timesteps=5000000, callback=val_callback)
+    
     # GUARDAR MODELO
     print("Guardando modelo...")
-    model.save(shower_path + "PPO_F1_5M_V8")
+    model.save(shower_path + "PPO_F1_5M_V13")
 
 
 

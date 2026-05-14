@@ -7,24 +7,12 @@ from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
 from entorno import F1Env
 
 
-def testear_modelo(track_file_path, model_path, tipo_fisicas, tipo_recompensa):
-    # 1. TRADUCTOR DE FÍSICAS (De texto del menú a número del entorno)
-    if "Básicas" in tipo_fisicas:
-        fisicas_int = 1
-    elif "Supervisadas" in tipo_fisicas:
-        fisicas_int = 2
-    else:
-        fisicas_int = 3 # Avanzadas
-
-    # 2. TRADUCTOR DE RECOMPENSA (De texto del menú a texto corto)
-    if "V1" in tipo_recompensa:
-        recompensa_str = "V1"
-    else:
-        recompensa_str = "V2"
-
+def testear_modelo():
+    track_file_path = 'D://Aplicaciones//TFG2//Circuitos//Monza.csv'
+    model_path = "./Training/SavedModels/showerPPO/Mejores_Modelos/best_model.zip"
     # Ruta al modelo guardado
     circuito = pd.read_csv(track_file_path)
-    env = F1Env(circuito, tipo_fisicas=fisicas_int, tipo_recompensa=recompensa_str)
+    env = F1Env(circuito, tipo_fisicas=3, tipo_recompensa="V1")
 
     # 🚀 CARGAR EL MODELO ENTRENADO
     # Observa que usamos PPO.load() en lugar de PPO('MultiInputPolicy', ...)

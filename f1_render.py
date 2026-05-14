@@ -104,7 +104,7 @@ class F1Renderer:
 
         #pygame.draw.circle(self.screen, (255, 0, 0), car_pos, 5)  # Coche representado como un círculo rojo
 
-        pygame.time.delay(40)  
+        pygame.time.delay(40)
         pygame.display.flip()
 
     def close(self):
