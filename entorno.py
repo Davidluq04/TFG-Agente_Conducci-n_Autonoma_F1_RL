@@ -512,17 +512,6 @@ class F1Env(Env):
         #---COMENTARIOS DE ARRIBA COMO UN DIARIO, NO RELEVANTE AHORA---
 
 
-        # 2. Bono Cuadrático por Velocidad
-        # Normalizamos la velocidad entre 0 y 1 respecto a la máxima (350 km/h)
-        vel_normalizada = self.state['speed'] / 350.0 
-        
-        # Al elevar al cuadrado, premia masivamente ir a 300km/h frente a 150km/h
-        # Multiplicamos por 5 (puedes ajustar este factor) para darle peso
-        if avanzado_metros > 0:
-            bono_velocidad = (vel_normalizada ** 2) * 5.0
-        else:  
-            bono_velocidad = 0.0  # Sin bono si no avanza, para evitar que se quede parado intentando ir a toda velocidad sin avanzar
-
 
         reward = avanzado_metros * 1 - 0.1 # Le damos puntos por la distancia que avanza, pero le restamos 0.1 por cada tick que pasa para que "tenga prisa" en terminar la vuelta
         terminated = False
