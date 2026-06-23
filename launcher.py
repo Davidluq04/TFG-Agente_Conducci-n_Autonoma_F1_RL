@@ -2,139 +2,160 @@ import customtkinter as ctk
 import threading
 from main import testear_modelo 
 
+
 ctk.set_appearance_mode("Dark")
-ctk.set_default_color_theme("blue")
+ctk.set_default_color_theme("dark-blue") 
 
 class F1Launcher(ctk.CTk):
     def __init__(self):
         super().__init__()
 
-        self.title("F1 RL Simulator Launcher")
-        self.geometry("500x550") # <-- AMPLIADO PARA QUE QUEPA EL BOTÓN
+        self.title("F1 IA Simulator - Setup")
+        self.geometry("550x700")
         self.resizable(False, False)
 
-        # ---- DICCIONARIO DE DEPENDENCIAS (NUEVA ESTRUCTURA) ----
-        # Orden: Físicas -> Recompensa -> Circuitos y Modelos
         self.configuraciones = {
             "Básicas": {
                 "V1 (Avance y Supervivencia)": {
                     "circuitos": {
-                        "Monza": "D://Aplicaciones//TFG2//Circuitos//Monza.csv",
-                        "Montreal": "D://Aplicaciones//TFG2//Circuitos//Montreal.csv",
-                        "Melbourne": "D://Aplicaciones//TFG2//Circuitos//Melbourne.csv",
-                        "Silverstone": "D://Aplicaciones//TFG2//Circuitos//Silverstone.csv",
-                        "Sochi": "D://Aplicaciones//TFG2//Circuitos//Sochi.csv",
-                        "Yas Marina": "D://Aplicaciones//TFG2//Circuitos//YasMarina.csv"
+                        "Monza": "./Circuitos/Monza.csv",
+                        "Montreal": "./Circuitos/Montreal.csv",
+                        "Melbourne": "./Circuitos/Melbourne.csv",
+                        "Silverstone": "./Circuitos/Silverstone.csv",
+                        "Sochi": "./Circuitos/Sochi.csv",
+                        "Yas Marina": "./Circuitos/YasMarina.csv"
                     },
                     "modelos": {
-                        "Modelo Básico V1": "./Training/SavedModels/showerPPO/PPO_F1_5M_V1.zip"
+                        "Modelo Básico V1": "./Training/Modelos_Finales/PPO_F1_1M_V5.zip"
                     }
                 }
-                # Básicas no tiene V2
             },
             "Avanzadas": {
                 "V1 (Avance y Supervivencia)": {
                     "circuitos": {
-                        "Montreal": "D://Aplicaciones//TFG2//Circuitos//Montreal.csv",
-                        "Monza": "D://Aplicaciones//TFG2//Circuitos//Monza.csv",
-                        "Sochi": "D://Aplicaciones//TFG2//Circuitos//Sochi.csv",
+                        "Monza": "./Circuitos/Monza.csv",
+                        "Montreal": "./Circuitos/Montreal.csv",
+                        "Sochi": "./Circuitos/Sochi.csv",
                     },
                     "modelos": {
-                        "Modelo Avanzado (10M)": "./Training/SavedModels/showerPPO/PPO_F1_10M_V1.zip",
-                        "Mejor Modelo Avanzado": "./Training/SavedModels/showerPPO/Mejores_Modelos/best_model.zip"
+                        "Modelo Avanzado (10M)": "./Training/Modelos_Finales/PPO_F1_10M_V1.zip"
                     }
                 },
                 "V2 (Velocidad Ideal y Trazada)": {
                     "circuitos": {
-                        "Monza RL (V2)": "D://Aplicaciones//TFG2//Datasets//FuncionRecompensa//Monza_RL.csv"
+                        "Monza RL (V2)": "./Datasets/FuncionRecompensa/Monza_RL.csv"
                     },
                     "modelos": {
-                        # pon aquí el nombre de tu modelo entrenado con la recompensa V2
-                        "Modelo Entrenado en V2": "./Training/SavedModels/showerPPO/PPO_F1_5M_V10.zip" 
+                        "ModeloV2 Vuelta Rápida": "./Training/Modelos_Finales/best_model_15C11.zip",
+                        "ModeloV2 Sin variar Hiperparámetros": "./Training/Modelos_Finales/best_model_15C6.zip" 
                     }
                 }
             },
             "Supervisadas (Machine Learning)": {
                 "V1 (Avance y Supervivencia)": {
                     "circuitos": {
-                        "Yas Marina": "D://Aplicaciones//TFG2//Circuitos//YasMarina.csv"
+                        "Monza": "./Circuitos/Monza.csv",
+                        "Montreal": "./Circuitos/Montreal.csv",
+                        "Melbourne": "./Circuitos/Melbourne.csv",
+                        "Silverstone": "./Circuitos/Silverstone.csv",
+                        "Sochi": "./Circuitos/Sochi.csv",
+                        "Yas Marina": "./Circuitos/YasMarina.csv"
                     },
                     "modelos": {
-                        "Modelo ML Supervisado": "./Training/SavedModels/showerPPO/Modelo_Supervisado.zip"
+                        "Modelo Supervisado": "./Training/Modelos_Finales/best_model_arbol.zip",
+                        "Modelo Supervisado Fallido": "./Training/Modelos_Finales/PPO_F1_5M_V13.zip"
                     }
                 }
-                # Si en el futuro tienes V2 para ML, añádelo aquí con la misma estructura que Avanzadas
             }
         }
 
-        # ---- TÍTULO ----
-        self.label_titulo = ctk.CTkLabel(self, text="🏎️ Simulador F1 IA", font=ctk.CTkFont(size=24, weight="bold"))
-        self.label_titulo.pack(pady=(20, 10))
 
-        # ---- SELECCIÓN DE FÍSICAS ----
-        self.label_fisicas = ctk.CTkLabel(self, text="Selecciona el Motor de Físicas:", font=ctk.CTkFont(size=14))
-        self.label_fisicas.pack(pady=(10, 0))
+        #CABECERA
+        self.header_frame = ctk.CTkFrame(self, fg_color="transparent")
+        self.header_frame.pack(pady=(30, 15), fill="x")
+
+        self.label_titulo = ctk.CTkLabel(self.header_frame, text="F1 RL SIMULATOR", font=ctk.CTkFont(size=28, weight="bold"))
+        self.label_titulo.pack()
         
-        opciones_fisicas = list(self.configuraciones.keys())
-        self.combo_fisicas = ctk.CTkComboBox(self, values=opciones_fisicas, width=250, command=self.cambio_fisicas)
-        self.combo_fisicas.set("Avanzadas")
-        self.combo_fisicas.pack(pady=5)
+        self.label_subtitulo = ctk.CTkLabel(self.header_frame, text="Panel de Configuración del Entorno", font=ctk.CTkFont(size=14, slant="italic"), text_color="gray")
+        self.label_subtitulo.pack()
 
-        # ---- SELECCIÓN DE RECOMPENSA ----
-        self.label_recompensa = ctk.CTkLabel(self, text="Función de Recompensa:", font=ctk.CTkFont(size=14))
-        self.label_recompensa.pack(pady=(20, 0))
+        #TARJETA PRINCIPA
+        self.card_frame = ctk.CTkFrame(self, corner_radius=15, fg_color="#2B2B2B")
+        self.card_frame.pack(padx=30, pady=10, fill="both", expand=True)
+
+        # Configuraciones de fuente para las labels
+        label_font = ctk.CTkFont(size=14, weight="bold")
+
+        #FÍSICAS
+        self.label_fisicas = ctk.CTkLabel(self.card_frame, text="Motor de Físicas", font=label_font, text_color="#A0A0A0")
+        self.label_fisicas.pack(pady=(20, 5), padx=30, anchor="w")
         
-        # Corregido: El command se pasa directamente dentro del CTkComboBox
-        self.combo_recompensa = ctk.CTkComboBox(self, values=[], width=250, command=self.cambio_recompensa)
-        self.combo_recompensa.pack(pady=5)
+        self.combo_fisicas = ctk.CTkComboBox(self.card_frame, values=list(self.configuraciones.keys()), 
+                                             width=400, height=35, command=self.cambio_fisicas, state="readonly")
+        self.combo_fisicas.pack(padx=30, pady=(0, 15))
 
-        # ---- SELECCIÓN DE CIRCUITO ----
-        self.label_circuito = ctk.CTkLabel(self, text="Selecciona el Circuito:", font=ctk.CTkFont(size=14))
-        self.label_circuito.pack(pady=(20, 0))
+        #RECOMPENSA
+        self.label_recompensa = ctk.CTkLabel(self.card_frame, text="Función de Recompensa", font=label_font, text_color="#A0A0A0")
+        self.label_recompensa.pack(pady=(10, 5), padx=30, anchor="w")
         
-        self.combo_circuito = ctk.CTkComboBox(self, values=[], width=250)
-        self.combo_circuito.pack(pady=5)
+        self.combo_recompensa = ctk.CTkComboBox(self.card_frame, values=[], 
+                                                width=400, height=35, command=self.cambio_recompensa, state="readonly")
+        self.combo_recompensa.pack(padx=30, pady=(0, 15))
 
-        # ---- SELECCIÓN DE MODELO ----
-        self.label_modelo = ctk.CTkLabel(self, text="Selecciona el Modelo PPO:", font=ctk.CTkFont(size=14))
-        self.label_modelo.pack(pady=(20, 0))
+        # SEPARADOR
+        self.separador = ctk.CTkFrame(self.card_frame, height=2, fg_color="#3B3B3B")
+        self.separador.pack(fill="x", padx=30, pady=10)
+
+        # CIRCUITO
+        self.label_circuito = ctk.CTkLabel(self.card_frame, text="Circuito de Pruebas", font=label_font, text_color="#A0A0A0")
+        self.label_circuito.pack(pady=(10, 5), padx=30, anchor="w")
         
-        self.combo_modelo = ctk.CTkComboBox(self, values=[], width=250)
-        self.combo_modelo.pack(pady=5)
+        self.combo_circuito = ctk.CTkComboBox(self.card_frame, values=[], width=400, height=35, state="readonly")
+        self.combo_circuito.pack(padx=30, pady=(0, 15))
 
-        # ---- BOTÓN LANZAR ----
-        self.boton_lanzar = ctk.CTkButton(self, text="🚀 INICIAR SIMULACIÓN", 
+        # MODELO
+        self.label_modelo = ctk.CTkLabel(self.card_frame, text="Modelo de Red Neuronal", font=label_font, text_color="#A0A0A0")
+        self.label_modelo.pack(pady=(10, 5), padx=30, anchor="w")
+        
+        self.combo_modelo = ctk.CTkComboBox(self.card_frame, values=[], width=400, height=35, state="readonly")
+        self.combo_modelo.pack(padx=30, pady=(0, 20))
+
+        # INCIAR
+        self.boton_lanzar = ctk.CTkButton(self, text="INICIAR SIMULACIÓN", 
                                           command=self.iniciar_simulacion, 
                                           font=ctk.CTkFont(size=16, weight="bold"),
-                                          height=40, fg_color="#E10600", hover_color="#900000")
-        self.boton_lanzar.pack(pady=(40, 20))
+                                          height=50, corner_radius=10, 
+                                          fg_color="#E10600", hover_color="#B30500") 
+        self.boton_lanzar.pack(pady=(20, 30), padx=30, fill="x")
 
         # Arrancamos con los valores por defecto
+        self.combo_fisicas.set("Avanzadas")
         self.cambio_fisicas("Avanzadas")
 
-    # ---- EVENTO: AL CAMBIAR LAS FÍSICAS ----
+
+
+
+
     def cambio_fisicas(self, eleccion_fisica):
-        # 1. Miramos qué recompensas soporta esta física (V1 y/o V2)
         recompensas_soportadas = list(self.configuraciones[eleccion_fisica].keys())
-        
-        # 2. Actualizamos el menú de recompensas
         self.combo_recompensa.configure(values=recompensas_soportadas)
         self.combo_recompensa.set(recompensas_soportadas[0])
         
-        # 3. Si solo hay una recompensa (ej: Básicas), lo bloqueamos para que no confunda
         if len(recompensas_soportadas) == 1:
             self.combo_recompensa.configure(state="disabled")
         else:
             self.combo_recompensa.configure(state="normal")
             
-        # 4. Actualizamos los circuitos y modelos de esa combinación
         self.cambio_recompensa(recompensas_soportadas[0])
 
-    # ---- EVENTO: AL CAMBIAR LA RECOMPENSA ----
     def cambio_recompensa(self, eleccion_recompensa):
+        if "V2" in eleccion_recompensa:
+            self.combo_fisicas.configure(state="disabled")
+        else:
+            self.combo_fisicas.configure(state="readonly")
+
         eleccion_fisica = self.combo_fisicas.get()
-        
-        # Cogemos circuitos y modelos directamente de la combinación exacta
         circuitos = self.configuraciones[eleccion_fisica][eleccion_recompensa]["circuitos"]
         modelos = self.configuraciones[eleccion_fisica][eleccion_recompensa]["modelos"]
         
@@ -144,7 +165,6 @@ class F1Launcher(ctk.CTk):
         self.combo_modelo.configure(values=list(modelos.keys()))
         self.combo_modelo.set(list(modelos.keys())[0])
 
-    # ---- EVENTO: AL HACER CLIC EN EL BOTÓN ----
     def iniciar_simulacion(self):
         fisicas = self.combo_fisicas.get()
         recompensa = self.combo_recompensa.get()
@@ -153,10 +173,8 @@ class F1Launcher(ctk.CTk):
         
         ruta_circuito = self.configuraciones[fisicas][recompensa]["circuitos"][n_circuito]
         ruta_modelo = self.configuraciones[fisicas][recompensa]["modelos"][n_modelo]
-
-        print(f"Lanzando -> Físicas: {fisicas} | Recompensa: {recompensa[:2]} | Circuito: {n_circuito}")
         
-        self.boton_lanzar.configure(state="disabled", text="EJECUTANDO...")
+        self.boton_lanzar.configure(state="disabled", text="EJECUTANDO SIMULACIÓN...")
 
         hilo_simulacion = threading.Thread(
             target=self.correr_entorno, 
@@ -170,7 +188,7 @@ class F1Launcher(ctk.CTk):
         except Exception as e:
             print(f"Error en la simulación: {e}")
         finally:
-            self.boton_lanzar.configure(state="normal", text="🚀 INICIAR SIMULACIÓN")
+            self.boton_lanzar.configure(state="normal", text="INICIAR SIMULACIÓN")
 
 if __name__ == "__main__":
     app = F1Launcher()

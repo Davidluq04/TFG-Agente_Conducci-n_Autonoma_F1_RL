@@ -1,0 +1,11 @@
+pandas
+numpy
+scipy
+gymnasium
+matplotlib
+stable-baselines3
+pygame
+joblib
+customtkinter
+scikit-learn
+fastf1

@@ -9,8 +9,8 @@ ROTACION_GRADOS = 0.0  # <-- Cámbialo por tu valor
 ESCALA = 0.1001271900897584           # <-- Cámbialo por tu valor
 
 # --- 2. CARGAR DATOS ---
-track = pd.read_csv('D://Aplicaciones//TFG2//Circuitos//Monza.csv')
-telem = pd.read_csv('D://Aplicaciones//TFG2//Datasets//FuncionRecompensa//Monza_Telemetria_Ideal_2m.csv').dropna(subset=['X', 'Y', 'Speed'])
+track = pd.read_csv('./Circuitos/Monza.csv')
+telem = pd.read_csv('./Datasets/FuncionRecompensa/Monza_Telemetria_Ideal_2m.csv').dropna(subset=['X', 'Y', 'Speed'])
 
 # --- 3. APLICAR TRANSFORMACIÓN A LA TELEMETRÍA ---
 ang_rad = np.radians(ROTACION_GRADOS)
@@ -45,7 +45,7 @@ track['ideal_x'] = telem['ideal_x_trans'].iloc[indices_cercanos].values
 track['ideal_y'] = telem['ideal_y_trans'].iloc[indices_cercanos].values
 
 # --- 5. GUARDAR EL CSV DEFINITIVO ---
-nombre_salida = 'D://Aplicaciones//TFG2//Datasets//FuncionRecompensa//Monza_RL.csv'
+nombre_salida = './Datasets/FuncionRecompensa/Monza_RL.csv'
 track.to_csv(nombre_salida, index=False)
 
 print(f"¡Hecho! '{nombre_salida}' generado correctamente con la telemetría inyectada.")

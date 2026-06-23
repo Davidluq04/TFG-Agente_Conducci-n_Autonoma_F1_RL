@@ -5,14 +5,14 @@ import matplotlib.pyplot as plt
 import joblib
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from sklearn.model_selection import train_test_split  # Librería para guardar modelos de Machine Learning
-ruta_modelo_fisicas = 'D://Aplicaciones//TFG2//Training//SavedModels_Supervisado//motor_fisicas_RandomForestRegressor_v3.joblib'
+ruta_modelo_fisicas = './Training/SavedModels_Supervisado/motor_fisicas_RandomForestRegressor_v3.joblib'
 modelo_fisicas = joblib.load(ruta_modelo_fisicas)
 '''
 pepe = modelo_fisicas.predict([[40.1, 100, 0.0]])
 print(pepe)
 
 '''
-df = pd.read_csv('D://Aplicaciones//TFG2//Datasets//telemetria_Vers2.csv')
+df = pd.read_csv('./Datasets/telemetria_Vers2.csv')
 
 X = df[['Speed', 'Throttle', 'Brake']].values
 y = df['Delta_Speed'].values

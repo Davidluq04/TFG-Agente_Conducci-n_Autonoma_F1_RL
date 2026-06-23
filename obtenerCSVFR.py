@@ -43,7 +43,7 @@ print(df_final.head())
 
 
 #Guardar en ruta local
-ruta_guardado = 'D://Aplicaciones//TFG2//Datasets//FuncionRecompensa//Monza_Telemetria_Ideal_2m.csv'
+ruta_guardado = './Datasets/FuncionRecompensa/Monza_Telemetria_Ideal_2m.csv'
 
 # Guardamos el DataFrame resampleado (que ya contiene Speed, Throttle, Brake y Delta_Speed)
 df_final.to_csv(ruta_guardado, index=False)

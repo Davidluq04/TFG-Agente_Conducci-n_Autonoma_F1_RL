@@ -63,7 +63,7 @@ for _, lap in laps.iterlaps():
 dataset_completo = pd.concat(todos_df, ignore_index=True)
 
 #Guardar en ruta local
-ruta_guardado = 'D://Aplicaciones//TFG2//Datasets//telemetria_Vers_CarCompl_0.1seg.csv'
+ruta_guardado = './Datasets/telemetria_Vers_CarCompl_0.1seg.csv'
 
 # Guardamos el DataFrame resampleado (que ya contiene Speed, Throttle, Brake y Delta_Speed)
 dataset_completo.to_csv(ruta_guardado, index=False)

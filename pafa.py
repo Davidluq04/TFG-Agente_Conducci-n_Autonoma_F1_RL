@@ -8,11 +8,13 @@ from entorno import F1Env
 
 
 def testear_modelo():
-    track_file_path = 'D://Aplicaciones//TFG2//Circuitos//Monza.csv'
-    model_path = "./Training/SavedModels/showerPPO/Mejores_Modelos/best_model.zip"
+    track_file_path = './Datasets/FuncionRecompensa/Monza_RL.csv'
+    #model_path = "./Training/SavedModels/showerPPO/Mejores_Modelos/best_model.zip"
+    model_path = "./Training/SavedModels/showerPPO/PPO_F1_5M_V15_C6.zip"
+
     # Ruta al modelo guardado
     circuito = pd.read_csv(track_file_path)
-    env = F1Env(circuito, tipo_fisicas=3, tipo_recompensa="V1")
+    env = F1Env(circuito, tipo_fisicas=3, tipo_recompensa="V2")
 
     # 🚀 CARGAR EL MODELO ENTRENADO
     # Observa que usamos PPO.load() en lugar de PPO('MultiInputPolicy', ...)

@@ -19,17 +19,46 @@ class F1Renderer:
         self.escala = 10
 
         self.fuente = pygame.font.SysFont('Arial', 24, bold=True)
+        self.fuente_btn = pygame.font.SysFont('Arial', 16, bold=True) # Fuente para los botones
 
         self.screen = pygame.display.set_mode((ancho, largo))
 
-        coche_img = pygame.image.load('D://Aplicaciones//TFG2//Coche//coche.png') 
+        coche_img = pygame.image.load('./Coche/coche.png') 
         self.imagen_escalada = pygame.transform.scale(coche_img, (50, 20))
         self.imagen_escalada = self.imagen_escalada.convert_alpha()  # Convertir para mejorar el rendimiento y mantener la transparencia
 
         pygame.display.set_caption('Simulador F1 RL')
 
+        #botones
+        self.paused = False
+        self.btn_pause = pygame.Rect(ancho - 160, 20, 140, 40)
+        self.btn_restart = pygame.Rect(ancho - 160, 70, 140, 40)
+        self.btn_quit = pygame.Rect(ancho - 160, 120, 140, 40)
+
     def render(self, state):
-        #----PINTAR CIRCUITO----
+
+        comando = "CONTINUE" # Comando por defecto
+
+        
+        for e in pygame.event.get():
+            if e.type == QUIT:
+                comando = "QUIT"
+            elif e.type == pygame.MOUSEBUTTONDOWN:
+                if e.button == 1:  # Clic izquierdo del ratón
+                    # Comprobamos si el clic choca con alguno de los botones
+                    if self.btn_pause.collidepoint(e.pos):
+                        self.paused = not self.paused # Alternamos entre pausa/play
+                    elif self.btn_restart.collidepoint(e.pos):
+                        comando = "RESTART"
+                        self.paused = False # Quitamos la pausa si reiniciamos
+                    elif self.btn_quit.collidepoint(e.pos):
+                        comando = "QUIT"
+
+        # Si estamos en pausa, sobreescribimos el comando
+        if self.paused:
+            comando = "PAUSE"
+
+        #PINTAR CIRCUIT
 
         self.coche_x = state['car_x_position']
         self.coche_y = state['car_y_position']
@@ -62,7 +91,7 @@ class F1Renderer:
         pygame.draw.lines(self.screen, (0, 0, 0), True, puntos_izq_pantalla, 2)
         pygame.draw.lines(self.screen, (0, 0, 0), True, puntos_der_pantalla, 2)
 
-        #----PINTAR COCHE----    
+        #PINTAR COCHE 
 
         
 
@@ -74,10 +103,10 @@ class F1Renderer:
         self.screen.blit(imagen_rotada, car_pos.topleft)  # Dibujar el coche en la pantalla
 
 
-        #----TELEMETRIA----
+        #TELEMETRIA
         velocidad_texto = int(state['speed'])
         texto = self.fuente.render(f"Velocidad: {velocidad_texto} km/h", True, (255, 255, 255))  # Velocidad en porcentaje
-        self.screen.blit(texto, (20, 20))  # Mostrar la velocidad en la esquina superior izquierda
+        self.screen.blit(texto, (20, 20))  # Mostrar la velocidad
 
         #Aceleracion o frenada
 
@@ -104,8 +133,32 @@ class F1Renderer:
 
         #pygame.draw.circle(self.screen, (255, 0, 0), car_pos, 5)  # Coche representado como un círculo rojo
 
+        #BOTONES
+        if not self.paused:
+            color_pausa = (220, 160, 0)  # Amarillo para "PAUSAR"
+            texto_pausa = "PAUSAR"
+        else:
+            color_pausa = (0, 180, 0)  # Verde para "REANUDAR"
+            texto_pausa = "REANUDAR"
+
+        pygame.draw.rect(self.screen, color_pausa, self.btn_pause, border_radius=8)
+        text_surf_p = self.fuente_btn.render(texto_pausa, True, (255, 255, 255))
+        self.screen.blit(text_surf_p, text_surf_p.get_rect(center=self.btn_pause.center))
+
+        # Reiniciar
+        pygame.draw.rect(self.screen, (0, 120, 215), self.btn_restart, border_radius=8)
+        text_surf_r = self.fuente_btn.render("REINICIAR", True, (255, 255, 255))
+        self.screen.blit(text_surf_r, text_surf_r.get_rect(center=self.btn_restart.center))
+
+        # Finalizar
+        pygame.draw.rect(self.screen, (225, 6, 0), self.btn_quit, border_radius=8)
+        text_surf_q = self.fuente_btn.render("FINALIZAR", True, (255, 255, 255))
+        self.screen.blit(text_surf_q, text_surf_q.get_rect(center=self.btn_quit.center))
+
         pygame.time.delay(40)
         pygame.display.flip()
+
+        return comando
 
     def close(self):
         pygame.quit()
